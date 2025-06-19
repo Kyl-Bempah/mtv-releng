@@ -16,3 +16,8 @@ The tooling then:
 > **NOTE**: `vcs-ref` label is not under our control so there is no guarantee of correct behavior across different build systems.
 > 
 > For Konflux however, even these should be set to reflect git commit from which the components were built.
+
+### TODO Features
+- branching helper
+- latest IIB grabber
+- commits diff of 2 IIBs   
