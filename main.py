@@ -28,7 +28,7 @@ python main.py -i registry.redhat.io/redhat/redhat-operator-index:v4.18 -v 2.8.5
 def run():
     args = parser.parse_args()
     bundle = parse_iib(args.iib, args.version)["BUNDLE_IMAGE"]
-    bundle = utils.convert_commit_to_sha(bundle)
+    bundle = utils.convert_tag_to_sha(bundle)
     components = parse_bundle(bundle)
     commits = {}
     for component, component_url in components.items():

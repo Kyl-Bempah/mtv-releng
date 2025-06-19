@@ -15,5 +15,6 @@ def parse_iib(iib_url: str, version: str) -> dict:
 
     if not out:
         print("Was unable to find BUNDLE image in specified IIB")
+        exit(1)
 
     return utils.parse_key_val_output(out)

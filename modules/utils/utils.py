@@ -32,11 +32,13 @@ def parse_key_val_output(output: list[str]) -> dict:
     return parsed
 
 
-def convert_commit_to_sha(img: str) -> str:
+def convert_tag_to_sha(img: str) -> str:
+    """Converts image URL with tag to image URL with sha"""
     if "@sha256:" not in img:
-        print("Converting commit to sha...")
+        print("Converting tag to sha...")
         sha = run_command(["bash", "scripts/convert_to_sha.sh", img])
         if not sha:
             print(f"Could not get sha of from: {img}")
+            exit(1)
         return f"{img.split(':')[0]}@{sha[0]}"
     return img

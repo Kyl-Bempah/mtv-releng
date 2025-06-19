@@ -13,5 +13,6 @@ def parse_bundle(bundle_url: str) -> dict:
 
     if not out:
         print("Was unable to find COMPONENT images in specified BUNDLE")
+        exit(1)
 
     return utils.parse_key_val_output(out)

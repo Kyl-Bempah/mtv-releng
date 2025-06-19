@@ -13,5 +13,6 @@ def parse_component(component_url: str) -> dict:
 
     if not out:
         print("Was unable to find commit in specified COMPONENT")
+        exit(1)
 
     return utils.parse_key_val_output(out)
