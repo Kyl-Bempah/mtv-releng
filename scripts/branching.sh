@@ -79,7 +79,9 @@ process_repo () {
     # The appstudio.openshift.io/application and appstudio.openshift.io/component labels in .tekton/ files must be adjusted to specify the right Application and Component respectively. Failing to do this will cause builds of the pipeline to be associated with the wrong application or component. example: forklift-operator-dev-preview -> forklift-operator-2-9
     sed -i -e "s/dev-preview/$version_name/g" .tekton/*
 
-    git add .tekton/ build/release.conf
+    sed -i -e "s/dev-preview/$version_name/g" build/forklift-operator-bundle/images.conf
+
+    git add .tekton/ build/release.conf build/forklift-operator-bundle/images.conf
     git commit -sm "Code freeze for ${version:0:-2}"
 
     read -p "Do you want to see what changes were made? (Y/N): " confirm 
