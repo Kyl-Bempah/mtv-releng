@@ -36,8 +36,8 @@ layer_sha=${split_sha[-1]}
 tar -xf "${tmp_dir}/${layer_sha}" -C $tmp_dir 
 
 IFS=''
-component_images=$(cat $tmp_dir/manifests/*.clusterserviceversion.yaml | yq '.spec.install.spec.deployments[0].spec.template.spec.containers[0].env | .[] | select(.value|tostring | test("^quay") or test("^registry")) | [.name + ": " + .value] | .[]')
-operator_image=$(cat $tmp_dir/manifests/*.clusterserviceversion.yaml | yq '.spec.install.spec.deployments[0].spec.template.spec.containers[0].image')
+component_images=$(cat $tmp_dir/manifests/*.clusterserviceversion.yaml | yq -r '.spec.install.spec.deployments[0].spec.template.spec.containers[0].env | .[] | select(.value|tostring | test("^quay") or test("^registry")) | [.name + ": " + .value] | .[]')
+operator_image=$(cat $tmp_dir/manifests/*.clusterserviceversion.yaml | yq -r '.spec.install.spec.deployments[0].spec.template.spec.containers[0].image')
 
 echo "### RESULT ###"
 echo "$component_images"
