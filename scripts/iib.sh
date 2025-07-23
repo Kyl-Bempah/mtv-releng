@@ -27,28 +27,26 @@ skopeo copy $iib_url "dir://${tmp_dir}"
 
 # Get last layer from image
 # It contains the catalog layer
-layer_sha=$(cat $tmp_dir/manifest.json | jq '.layers | last | .digest')
+layer_sha=$(cat $tmp_dir/manifest.json | jq -r '.layers | last | .digest')
 echo "Layer containing the catalog: $layer_sha"
 
 # Split the format "sha256:1234..." into ["sha256", "1234..."] and get only the hash
 IFS=':'
 read -a split_sha <<< $layer_sha
 layer_sha=${split_sha[-1]}
-# Strip trailing quote mark
-layer_sha=${layer_sha:0:-1}
 IFS=''
 
 # Extract the layer tar
 tar -xf "${tmp_dir}/${layer_sha}" -C $tmp_dir 
 
 # Parse the bundle image URL
-bundle_img=$(cat $tmp_dir/configs/$operator_pkg/catalog.json | jq ". | select(.name == \"${operator_pkg}.v${version}\") | .image")
+bundle_img=$(cat $tmp_dir/configs/$operator_pkg/catalog.json | jq -r ". | select(.name == \"${operator_pkg}.v${version}\") | .image")
 
 if [[ -z $bundle_img ]]; then
     echo "Could not find bundle image in specified IIB for specified version."
 else
     echo "### RESULT ###"
-    echo "BUNDLE_IMAGE: ${bundle_img:1:-1}"
+    echo "BUNDLE_IMAGE: $bundle_img"
 fi
 
 # Remove created temporary directory
