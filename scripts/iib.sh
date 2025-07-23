@@ -39,7 +39,7 @@ layer_sha=${layer_sha#*\:}
 tar -xf "${tmp_dir}/${layer_sha}" -C $tmp_dir
 
 # Parse the bundle image URL
-bundle_img=$(cat $tmp_dir/configs/$operator_pkg/catalog.json | jq ". | select(.name == \"${operator_pkg}.v${version}\") | .image")
+bundle_img=$(cat $tmp_dir/configs/$operator_pkg/catalog.json | jq -r ". | select(.name == \"${operator_pkg}.v${version}\") | .image")
 
 if [[ -z $bundle_img ]]; then
     log "Could not find bundle image in specified IIB for specified version."
@@ -47,6 +47,7 @@ else
     # clear output file
     cl_output
     log "### RESULT ###"
+    # Don't know if it's still necessary to remove the trailing char
     w_output $(ytj "BUNDLE_IMAGE: ${bundle_img:1:-1}")
 fi
 

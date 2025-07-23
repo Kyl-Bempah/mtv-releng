@@ -20,13 +20,13 @@ fi
 tmp_dir=$(mktemp -d)
 log "Getting bundle $bundle_url..."
 log "Using $tmp_dir directory for manifests"
-bundle_commit=$(skopeo inspect -n $bundle_url | jq '.Labels | .["vcs-ref"]') 
+bundle_commit=$(skopeo inspect -n $bundle_url | jq -r '.Labels | .["vcs-ref"]') 
 log "Pulling image metadata..."
 skopeo copy $bundle_url "dir://${tmp_dir}"
 
 # Get last layer from image
 # It contains the csv layer
-layer_sha=$(cat $tmp_dir/manifest.json | jq '.layers | last | .digest')
+layer_sha=$(cat $tmp_dir/manifest.json | jq '.layers | last | .digest' -r)
 log "Layer containing the csv: $layer_sha"
 log "Extracting components..."
 
@@ -34,15 +34,12 @@ log "Extracting components..."
 IFS=':'
 read -a split_sha <<< $layer_sha
 layer_sha=${split_sha[-1]}
-# Strip trailing quote mark
-layer_sha=${layer_sha:0:-1}
 
 # Extract the layer tar
 tar -xf "${tmp_dir}/${layer_sha}" -C $tmp_dir 
 
 IFS=''
-component_images=$(cat $tmp_dir/manifests/*.clusterserviceversion.yaml | yq '.spec.install.spec.deployments[0].spec.template.spec.containers[0].env | .[] | select(.value == "quay*" or .value == "registry*") | [.name:.value] | .[][][]')
-
+component_images=$(cat $tmp_dir/manifests/*.clusterserviceversion.yaml | yq '.spec.install.spec.deployments[0].spec.template.spec.containers[0].env | .[] | select(.value|tostring | test("^quay") or test("^registry")) | [.name + ": " + .value] | .[]')
 operator_image=$(cat $tmp_dir/manifests/*.clusterserviceversion.yaml | yq '.spec.install.spec.deployments[0].spec.template.spec.containers[0].image')
 
 # clear output file

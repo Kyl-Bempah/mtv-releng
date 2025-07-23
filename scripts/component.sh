@@ -18,7 +18,7 @@ fi
 
 log "Getting commit from $component_url..."
 metadata=$(skopeo inspect -n $component_url)
-commit=$(echo $metadata | jq '.Labels.revision')
+commit=$(echo $metadata | jq -r '.Labels.revision')
 
 # clear cmd output file
 cl_output
@@ -27,7 +27,7 @@ if [[ $commit == "null" ]]; then
     log "Commit hash not found. Image is probably missing 'revision' label."
     log "Trying with 'vcs-ref' label. WARN: This may not indicate the correct build commit for OPERATOR_IMAGE"
 
-    commit=$(echo $metadata | jq '.Labels."vcs-ref"')
+    commit=$(echo $metadata | jq -r '.Labels."vcs-ref"')
     if [[ $commit == "null" ]]; then
         log "Commit not found even with 'vcs-ref' label."
     else
