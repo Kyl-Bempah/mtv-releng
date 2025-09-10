@@ -69,7 +69,7 @@ Run `scripts/branching.sh` and follow the instructions...
 ## TODO Features
 
 - latest IIB grabber
+- enable concurrency for different MTV versions and for multiple FBC catalogs
 
 ## TODO
-- add waiting mechanism for multiple OCP builds
 - dockerfile with secrets
