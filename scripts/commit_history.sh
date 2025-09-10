@@ -1,10 +1,7 @@
 #!/bin/bash
+source scripts/util.sh
 
 # Gets commit history for specified component (backend, frontend or gather), for specified branch (main, release-2.9...) and from the most recent commit to oldest commit (excluding the oldest commit in output)
-
-forklift_url="git@github.com:kubev2v/forklift.git"
-forklift_console_plugin_url="git@github.com:kubev2v/forklift-console-plugin.git"
-forklift_must_gather_url="git@github.com:kubev2v/forklift-must-gather.git"
 
 # Print Usage if argument is missing
 if [[ -z $1 || -z $2 || -z $3 || -z $4 ]]; then
@@ -22,13 +19,35 @@ branch=$2
 from=$3
 to=$4
 
+json="{}"
+
+if [[ $from == $to ]]; then
+  cl_output
+  w_output $json
+  exit 0
+fi
+
+function sanitize {
+  echo $1 | sed 's/"/\\\"/g'
+}
+
+if [[ -n $(ls | grep temp) ]]; then
+  rm -rf temp
+fi
 mkdir temp
 cd temp
-git init &> /dev/null
+git init
 git remote add origin https://github.com/kubev2v/$c.git
-git fetch origin $branch &> /dev/null
-git log --remotes --format=format:'%H%n  Commit: %s%n  Author: %an' --grep="chore(.*)" --invert-grep $from..$to > history
-echo $'' >> history
-cat history
+git fetch origin $branch
+commits=$(git --no-pager log --remotes --format=format:'%H%n' --grep="chore(.*)" --invert-grep $from..$to)
+for commit in ${commits[@]}; do
+  msg=$(sanitize "$(git show -s --format=format:'%s' $commit)")
+  author=$(sanitize "$(git show -s --format=format:'%an' $commit)")
+  date=$(sanitize "$(git show -s --format=format:'%cr' $commit)")
+  echo $msg
+  json=$(echo $json | jq ". += {\"$commit\": {\"msg\": \"$msg\", \"author\":\"$author\", \"date\": \"$date\"}}")
+done
+cl_output
+w_output $json
 cd ..
 rm -rf temp

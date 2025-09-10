@@ -47,7 +47,36 @@ It's "modular" so you can choose what steps you want to execute and what to skip
 
 Run `scripts/branching.sh` and follow the instructions...
 
+## Script flow of automatic IIB builds
+1. automatic_iib
+2. authenticate
+3. latest_stage_bundle
+    1. verify_versions
+4. create_iib_pr
+    1. vefify_versions
+5. wait_for_build
+6. extract_diff
+    1. extract_info (for 1st iib)
+        1. iib
+        2. replace_for_quay
+        3. bundle
+        4. replace_for_quay
+        5. component
+    2. extract_info (for 2nd iib)
+    3. commit_history
+7. iib_notify
+
 ## TODO Features
 
 - latest IIB grabber
 - commits diff of 2 IIBs
+
+## TODO
+- fix scripts to output json
+- add logging capability
+- fix create_iib_pr
+- add waiting mechanism for multiple OCP builds
+- dockerfile with secrets
+- create registry stage account
+- implement getting of prev build
+- 

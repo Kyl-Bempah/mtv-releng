@@ -1,0 +1,212 @@
+{
+  "channel": "",
+  "thread_ts": "",
+	"blocks": [
+		{
+			"type": "header",
+			"text": {
+				"type": "plain_text",
+				"text": "OCP Versions",
+				"emoji": true
+			}
+		},
+		{
+			"type": "divider"
+		},
+		{
+			"type": "rich_text",
+			"elements": [
+				{
+					"type": "rich_text_section",
+					"elements": [
+						{
+							"type": "text",
+							"text": "",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": " "
+						},
+						{
+							"type": "text",
+							"text": ""
+						},
+						{
+							"type": "text",
+							"text": "\n\n"
+						},
+						{
+							"type": "text",
+							"text": "",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": " "
+						},
+						{
+							"type": "text",
+							"text": ""
+						},
+						{
+							"type": "text",
+							"text": "\n\n"
+						},
+						{
+							"type": "text",
+							"text": "",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": " "
+						},
+						{
+							"type": "text",
+							"text": ""
+						}
+					]
+				}
+			]
+		},
+		{
+			"type": "header",
+			"text": {
+				"type": "plain_text",
+				"text": "Changes introduced since last build",
+				"emoji": true
+			}
+		},
+		{
+			"type": "divider"
+		},
+		{
+			"type": "context",
+			"elements": [
+				{
+					"type": "mrkdwn",
+					"text": ""
+				}
+			]
+		},
+		{
+			"type": "divider"
+		},
+		{
+			"type": "section",
+			"text": {
+				"type": "mrkdwn",
+				"text": ""
+			}
+		},
+    {
+			"type": "header",
+			"text": {
+				"type": "plain_text",
+				"text": "Konflux",
+				"emoji": true
+			}
+		},
+		{
+			"type": "divider"
+		},
+		{
+			"type": "rich_text",
+			"elements": [
+				{
+					"type": "rich_text_section",
+					"elements": [
+						{
+							"type": "text",
+							"text": "Bundle URL:",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": "\n"
+						}
+					]
+				},
+				{
+					"type": "rich_text_preformatted",
+					"border": 0,
+					"elements": [
+						{
+							"type": "text",
+							"text": ""
+						}
+					]
+				},
+				{
+					"type": "rich_text_section",
+					"elements": [
+						{
+							"type": "text",
+							"text": "\n"
+						},
+						{
+							"type": "text",
+							"text": "Snapshot:",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": "\n"
+						}
+					]
+				},
+				{
+					"type": "rich_text_preformatted",
+					"border": 0,
+					"elements": [
+						{
+							"type": "text",
+							"text": ""
+						}
+					]
+				},
+				{
+					"type": "rich_text_section",
+					"elements": [
+						{
+							"type": "text",
+							"text": "\n"
+						},
+						{
+							"type": "text",
+							"text": "Build commits:",
+							"style": {
+								"bold": true
+							}
+						},
+						{
+							"type": "text",
+							"text": "\n"
+						}
+					]
+				},
+				{
+					"type": "rich_text_preformatted",
+					"border": 0,
+					"elements": [
+						{
+							"type": "text",
+							"text": ""
+						}
+					]
+				}
+			]
+		}
+	]
+}

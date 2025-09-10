@@ -1,4 +1,5 @@
 #/bin/bash
+source scripts/util.sh
 
 component_url=$1
 PROT="docker://"
@@ -15,22 +16,25 @@ if [[ ${component_url:0:${#PROT}} != $PROT ]]; then
     component_url="${PROT}${component_url}"
 fi
 
-echo "Getting commit from $component_url..."
+log "Getting commit from $component_url..."
 metadata=$(skopeo inspect -n $component_url)
 commit=$(echo $metadata | jq '.Labels.revision')
 
+# clear cmd output file
+cl_output
+
 if [[ $commit == "null" ]]; then
-    echo "Commit hash not found. Image is probably missing 'revision' label."
-    echo "Trying with 'vcs-ref' label. WARN: This may not indicate the correct build commit for OPERATOR_IMAGE"
+    log "Commit hash not found. Image is probably missing 'revision' label."
+    log "Trying with 'vcs-ref' label. WARN: This may not indicate the correct build commit for OPERATOR_IMAGE"
 
     commit=$(echo $metadata | jq '.Labels."vcs-ref"')
     if [[ $commit == "null" ]]; then
-        echo "Commit not found even with 'vcs-ref' label."
+        log "Commit not found even with 'vcs-ref' label."
     else
-        echo "### RESULT ###"
-        echo "COMMIT: ${commit:1:-1}"
+        log "### RESULT ###"
+        w_output $(ytj "COMMIT: ${commit:1:-1}")
     fi
 else
-    echo "### RESULT ###"
-    echo "COMMIT: ${commit:1:-1}"
+    log "### RESULT ###"
+    w_output $(ytj "COMMIT: ${commit:1:-1}")
 fi
