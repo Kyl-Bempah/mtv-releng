@@ -69,14 +69,7 @@ Run `scripts/branching.sh` and follow the instructions...
 ## TODO Features
 
 - latest IIB grabber
-- commits diff of 2 IIBs
 
 ## TODO
-- fix scripts to output json
-- add logging capability
-- fix create_iib_pr
 - add waiting mechanism for multiple OCP builds
 - dockerfile with secrets
-- create registry stage account
-- implement getting of prev build
-- 
