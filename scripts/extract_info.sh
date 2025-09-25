@@ -32,7 +32,7 @@ scripts/bundle.sh $bundle_img
 cmps=$(r_output | jq '.' -r)
 
 # component origins
-origins='{"mtv-controller-rhel9": "forklift", "mtv-must-gather-rhel8": "forklift-must-gather", "mtv-validation-rhel9":"forklift", "mtv-api-rhel9":"forklift", "mtv-populator-controller-rhel9":"forklift", "mtv-rhv-populator-rhel8":"forklift", "mtv-virt-v2v-rhel9":"forklift", "mtv-openstack-populator-rhel9":"forklift", "mtv-console-plugin-rhel9":"forklift-console-plugin", "mtv-ova-provider-server-rhel9":"forklift", "mtv-vsphere-xcopy-volume-populator-rhel9":"forklift", "mtv-rhel9-operator":"forklift", "mtv-operator-bundle": "forklift"}'
+origins='{"mtv-controller-rhel9": "forklift", "mtv-must-gather-rhel8": "forklift-must-gather", "mtv-validation-rhel9":"forklift", "mtv-api-rhel9":"forklift", "mtv-populator-controller-rhel9":"forklift", "mtv-rhv-populator-rhel8":"forklift", "mtv-virt-v2v-rhel9":"forklift", "mtv-openstack-populator-rhel9":"forklift", "mtv-console-plugin-rhel9":"forklift-console-plugin", "mtv-ova-provider-server-rhel9":"forklift", "mtv-vsphere-xcopy-volume-populator-rhel9":"forklift", "mtv-rhel9-operator":"forklift", "mtv-operator-bundle": "forklift", "mtv-cli-download-rhel9": "forklift"}'
 
 commits="[]"
 
