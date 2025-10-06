@@ -5,6 +5,9 @@
 
 set -euo pipefail
 
+# Source utility functions
+source "$(dirname "$0")/util.sh"
+
 # Constants
 readonly JENKINS_BASE_URL="https://jenkins-csb-mtv-qe-main.dno.corp.redhat.com"
 readonly MAX_WAIT_TIME=10800  # 3 hours in seconds
@@ -19,32 +22,8 @@ readonly STATUS_SUCCESS="SUCCESS"
 readonly STATUS_FAILURE="FAILURE"
 readonly STATUS_ABORTED="ABORTED"
 
-# Colors for output
-readonly RED='\033[0;31m'
-readonly GREEN='\033[0;32m'
-readonly YELLOW='\033[1;33m'
-readonly BLUE='\033[0;34m'
-readonly NC='\033[0m' # No Color
-
 # Global variables
 declare -A JOB_TRACKING  # Associative array: job_name -> "job_number|job_url|ocp_version"
-
-# Logging functions
-log_info() {
-    echo -e "${BLUE}[INFO]${NC} $*"
-}
-
-log_success() {
-    echo -e "${GREEN}[SUCCESS]${NC} $*"
-}
-
-log_warning() {
-    echo -e "${YELLOW}[WARNING]${NC} $*"
-}
-
-log_error() {
-    echo -e "${RED}[ERROR]${NC} $*" >&2
-}
 
 # Function to display usage
 usage() {
@@ -52,7 +31,7 @@ usage() {
 Usage: $SCRIPT_NAME <iib> <mtv-version> <ocp-versions> <dev-preview>
 
 Arguments:
-  iib              Index Image Bundle
+  iib              Index Image Build
   mtv-version      MTV version (e.g., 2.9.3)
   ocp-versions     Comma-separated OCP versions (e.g., 4.20,4.19)
   dev-preview      true or false
@@ -161,19 +140,34 @@ trigger_jenkins_job() {
     
     # Build JSON parameters
     local json_params
-    json_params=$(cat << EOF
-{
-  "parameter": [
-    {"name": "OCP_VERSION", "value": "${openshift_version}"},
-    {"name": "IIB_NO", "value": "${iib}"},
-    {"name": "MTV_VERSION", "value": "${mtv_version}"},
-    {"name": "RC", "value": "${rc}"},
-    {"name": "CLUSTER_NAME", "value": "qemtv-01"},
-    {"name": "DEPLOY_MTV", "value": "true"}
-  ]
-}
-EOF
-    )
+    json_params=$(jq -n \
+        --arg openshift_version "$openshift_version" \
+        --arg iib "$iib" \
+        --arg mtv_version "$mtv_version" \
+        --arg rc "$rc" \
+        '{
+            "parameter": [
+                {"name": "CLUSTER_NAME", "value": "qemtv-01"},
+                {"name": "OCP_VERSION", "value": $openshift_version},
+                {"name": "NFS_SERVER_IP", "value": "f02-h06-000-r640.rdu2.scalelab.redhat.com"},
+                {"name": "NFS_SHARE_PATH", "value": "/home/nfsshare"},
+                {"name": "DEPLOY_MTV", "value": "true"},
+                {"name": "IIB_NO", "value": $iib},
+                {"name": "MTV_SOURCE", "value": "KONFLUX"},
+                {"name": "MTV_VERSION", "value": $mtv_version},
+                {"name": "RC", "value": $rc},
+                {"name": "BRANCH", "value": "master"},
+                {"name": "REMOTE_CLUSTER_NAME", "value": "qemtv-01"},
+                {"name": "RUN_TESTS_IN_PARALLEL", "value": "true"},
+                {"name": "GIT_BRANCH", "value": "main"},
+                {"name": "MTV_API_TEST_GIT_USER", "value": "RedHatQE"},
+                {"name": "OPENSHIFT_PYTHON_WRAPPER_GIT_BRANCH", "value": "main"},
+                {"name": "PYTEST_EXTRA_PARAMS", "value": ("--tc=release_test:true --tc=target_ocp_version:" + $openshift_version)},
+                {"name": "OCP_XY_VERSION", "value": $openshift_version},
+                {"name": "MTV_XY_VERSION", "value": $mtv_version},
+                {"name": "MATRIX_TYPE", "value": "RELEASE"}
+            ]
+        }')
     
     # Trigger the job
     local response
@@ -215,11 +209,7 @@ check_job_status() {
         
         # Check if job has been assigned a build number
         local build_number
-        if command -v jq >/dev/null 2>&1; then
-            build_number=$(echo "$queue_response" | jq -r '.executable.number // empty' 2>/dev/null)
-        else
-            build_number=$(echo "$queue_response" | grep -o '"number"[[:space:]]*:[[:space:]]*[0-9]\+' | grep -o '[0-9]\+' | head -1)
-        fi
+        build_number=$(echo "$queue_response" | jq -r '.executable.number // empty' 2>/dev/null)
         
         if [ -n "$build_number" ] && [ "$build_number" != "null" ]; then
             log_info "Job started with build number: $build_number"
@@ -246,19 +236,7 @@ check_job_status() {
     fi
     
     local status
-    if command -v jq >/dev/null 2>&1; then
-        status=$(echo "$status_response" | jq -r '.result // "RUNNING"' 2>/dev/null || echo "$STATUS_UNKNOWN")
-    else
-        # Fallback method using grep and sed
-        status=$(echo "$status_response" | \
-            grep -o '"result"[[:space:]]*:[[:space:]]*"[^"]*"' | \
-            sed 's/"result"[[:space:]]*:[[:space:]]*"\([^"]*\)"/\1/' | \
-            head -1)
-        
-        if [ -z "$status" ]; then
-            status="$STATUS_RUNNING"
-        fi
-    fi
+    status=$(echo "$status_response" | jq -r '.result // "RUNNING"' 2>/dev/null || echo "$STATUS_UNKNOWN")
     
     echo "$status"
 }
@@ -267,11 +245,10 @@ check_job_status() {
 wait_for_jobs() {
     log_info "Waiting for jobs to complete..."
     
-    local all_complete=false
     local start_time=$(date +%s)
     
-    while [ "$all_complete" = false ]; do
-        all_complete=true
+    while true; do
+        local all_complete=true
         
         for job_name in "${!JOB_TRACKING[@]}"; do
             local job_info="${JOB_TRACKING[$job_name]}"
@@ -282,21 +259,25 @@ wait_for_jobs() {
             
             if [[ "$status" == "$STATUS_RUNNING" || "$status" == "$STATUS_UNKNOWN" || "$status" == "$STATUS_QUEUED" ]]; then
                 all_complete=false
+                break
             fi
         done
         
-        if [ "$all_complete" = false ]; then
-            local current_time=$(date +%s)
-            local elapsed=$((current_time - start_time))
-            
-            if [ $elapsed -gt $MAX_WAIT_TIME ]; then
-                log_warning "Timeout: Jobs did not complete within $MAX_WAIT_TIME seconds"
-                break
-            fi
-            
-            log_info "Jobs still running... waiting $((POLL_INTERVAL / 60)) minutes"
-            sleep $POLL_INTERVAL
+        if [ "$all_complete" = true ]; then
+            log_success "All jobs completed"
+            break
         fi
+        
+        local current_time=$(date +%s)
+        local elapsed=$((current_time - start_time))
+        
+        if [ $elapsed -gt $MAX_WAIT_TIME ]; then
+            log_warning "Timeout: Jobs did not complete within $MAX_WAIT_TIME seconds"
+            break
+        fi
+        
+        log_info "Jobs still running... waiting $((POLL_INTERVAL / 60)) minutes"
+        sleep $POLL_INTERVAL
     done
 }
 

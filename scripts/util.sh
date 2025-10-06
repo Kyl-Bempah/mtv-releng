@@ -9,6 +9,13 @@ if [[ -z $(echo $MAIN_WORKER_PID) ]]; then
   export MAIN_WORKER_PID=$$
 fi
 
+# Colors for output
+readonly RED='\033[0;31m'
+readonly GREEN='\033[0;32m'
+readonly YELLOW='\033[1;33m'
+readonly BLUE='\033[0;34m'
+readonly NC='\033[0m' # No Color
+
 # log message with worker id
 function log {
   if [[ -z $mtv_worker_id ]]; then
@@ -39,6 +46,23 @@ function log {
     w+=" $(date +"%T.%3N")"
     echo -e "\n┏$w\n$@\n"
   fi
+}
+
+# Color-coded logging functions
+function log_info {
+  echo -e "${BLUE}[INFO]${NC} $*"
+}
+
+function log_success {
+  echo -e "${GREEN}[SUCCESS]${NC} $*"
+}
+
+function log_warning {
+  echo -e "${YELLOW}[WARNING]${NC} $*"
+}
+
+function log_error {
+  echo -e "${RED}[ERROR]${NC} $*" >&2
 }
 
 function w_output {
