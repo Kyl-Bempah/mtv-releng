@@ -1,4 +1,5 @@
 #!/bin/bash
+source scripts/util.sh
 
 # Replaces prod and stage image urls with quay urls
 
@@ -21,42 +22,32 @@ if ! [[ "$img" == *"redhat.io"* ]]; then
 fi
 
 # check version, quay images are only supported after 2.8.6 (including)
-if [ "$(printf '%s\n' "$version" "2.8.5" | sort -rV | head -n 1)" == "2.8.5" ]; then 
+if [ "$(printf '%s\n' \"$version\" \"2.8.5\" | sort -rV | head -n 1)" == "2.8.5" ]; then 
   echo $img
   exit 0
 fi
 
-
-cmps='{"mtv-controller-rhel9": "forklift-controller", "mtv-must-gather-rhel8": "forklift-must-gather", "mtv-validation-rhel9":"validation", "mtv-api-rhel9":"forklift-api", "mtv-populator-controller-rhel9":"populator-controller", "mtv-rhv-populator-rhel8":"ovirt-populator", "mtv-virt-v2v-rhel9":"virt-v2v", "mtv-openstack-populator-rhel9":"openstack-populator", "mtv-console-plugin-rhel9":"forklift-console-plugin", "mtv-ova-provider-server-rhel9":"ova-provider-server", "mtv-vsphere-xcopy-volume-populator-rhel9":"vsphere-xcopy-volume-populator", "mtv-rhel9-operator":"forklift-operator", "mtv-operator-bundle": "forklift-operator-bundle"}'
+cmps='{"mtv-controller-rhel9": "forklift-controller", "mtv-must-gather-rhel8": "forklift-must-gather", "mtv-validation-rhel9":"validation", "mtv-api-rhel9":"forklift-api", "mtv-populator-controller-rhel9":"populator-controller", "mtv-rhv-populator-rhel8":"ovirt-populator", "mtv-virt-v2v-rhel9":"virt-v2v", "mtv-openstack-populator-rhel9":"openstack-populator", "mtv-console-plugin-rhel9":"forklift-console-plugin", "mtv-ova-provider-server-rhel9":"ova-provider-server", "mtv-vsphere-xcopy-volume-populator-rhel9":"vsphere-xcopy-volume-populator", "mtv-rhel9-operator":"forklift-operator", "mtv-operator-bundle": "forklift-operator-bundle", "mtv-cli-download-rhel9": "forklift-cli-download"}'
 
 # get only the image name
-IFS='/'
-read -a split_img <<< $img
-cmp=${split_img[-1]}
-repo=${split_img[1]}
-IFS='@'
-read -a split_cmp <<< $cmp
-cmp=${split_cmp[0]}
-sha=${split_cmp[-1]}
-IFS=''
+img_sha=${img##*/}
+repo=${img#*/}
+repo=${repo%%/*}
+cmp=${img_sha%%@*}
+sha=${img_sha##*\:}
 
 # pair the prod cmp name with quay cmp name
-cmp=$(echo $cmps | jq ".\"$cmp\"")
-# strip quotes
-cmp=${cmp:1:-1}
+cmp=$(echo $cmps | jq ".\"$cmp\"" -r)
 
 # for mtv-candidate repo, the version is always dev-preview
 if [[ $repo == "mtv-candidate" ]]; then
   cmp_ver="dev-preview"
 else
   # get only x-y from x.y.z version and replace dot for dash
-  IFS='.'
-  read -a split_v <<< $version
-  IFS=''
-
-  cmp_ver=${split_v[0]}-${split_v[1]}
+  cmp_ver=${version%.*}
+  cmp_ver=${cmp_ver/./-}
 fi
 
 registry="quay.io/redhat-user-workloads/rh-mtv-1-tenant"
-echo $registry"/"forklift-operator-$cmp_ver"/"$cmp"-"$cmp_ver"@"$sha
+echo $registry"/"forklift-operator-$cmp_ver"/"$cmp"-"$cmp_ver"@sha256:"$sha
 

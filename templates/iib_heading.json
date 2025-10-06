@@ -1,0 +1,22 @@
+{
+  "channel": "",
+	"blocks": [
+		{
+			"type": "header",
+			"text": {
+				"type": "plain_text",
+				"text": "",
+				"emoji": true
+			}
+		},
+		{
+			"type": "context",
+			"elements": [
+				{
+					"type": "mrkdwn",
+					"text": "*Build type*  |  Automatic"
+				}
+			]
+		}
+  ]
+}

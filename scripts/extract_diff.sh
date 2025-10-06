@@ -1,4 +1,5 @@
 #!/bin/bash
+source scripts/util.sh
 
 # Get commit history from the specified iibs
 
@@ -16,45 +17,28 @@ if [[ -z $1 || -z $2 || -z $3 || -z $4 ]]; then
     exit 0
 fi
 
-# redirect cmd output to stdout and variable
-{ new_iib_info=$(scripts/extract_info.sh $new_iib $new_version | tee /dev/fd/5); } 5>&1
-new_iib_info=$(echo "$new_iib_info" | tail -n 3)
-{ old_iib_info=$(scripts/extract_info.sh $old_iib $old_version | tee /dev/fd/5); } 5>&1
-old_iib_info=$(echo "$old_iib_info" | tail -n 3)
+scripts/extract_info.sh $new_iib $new_version
+new_iib_info=$(r_output)
 
-declare -A new_commits
-declare -A old_commits
-declare -a origins
+scripts/extract_info.sh $old_iib $old_version
+old_iib_info=$(r_output)
 
-IFS=$'\n'
-for origin in ${new_iib_info[@]}; do
-  new_commit=$(echo $origin | cut -d ' ' -f 2)
-  new_origin=$(echo $origin | cut -d ':' -f 1)
-  new_commits[$new_origin]=$new_commit
-  if [[ ! " ${origins[*]} " =~ [[:space:]]${new_origin}[[:space:]] ]]; then
-    origins+=($new_origin)
-  fi
-done
+new_iib_info=$(echo $new_iib_info | jq '. += {"diffs": {}}')
 
-for origin in ${old_iib_info[@]}; do
-  old_commit=$(echo $origin | cut -d ' ' -f 2)
-  old_origin=$(echo $origin | cut -d ':' -f 1)
-  old_commits[$old_origin]=$old_commit
-  if [[ ! " ${origins[*]} " =~ [[:space:]]${old_origin}[[:space:]] ]]; then
-    origins+=($old_origin)
-  fi
-done
-IFS=''
-
-for origin in ${origins[@]}; do
+for origin in $(echo $new_iib_info | jq '.latest_commits | keys.[]' -r); do
+  new_iib_info=$(echo $new_iib_info | jq ".diffs += {\"$origin\": {}}")
   xy=$(echo $new_version | cut -d '.' -f 1).$(echo $new_version | cut -d '.' -f 2)
 
+  # check if the version is on main or release branch
   if [[ $(curl -s https://raw.githubusercontent.com/kubev2v/$origin/refs/heads/release-$xy/build/release.conf) == *"404"* ]]; then
     branch=main
   else
     branch=release-$xy
   fi
   echo -e "\n$origin commits:"
-  scripts/commit_history.sh $origin $branch "${old_commits[$origin]}" "${new_commits[$origin]}"
+  scripts/commit_history.sh $origin $branch $(echo $old_iib_info | jq ".latest_commits.\"$origin\"" -r) $(echo $new_iib_info | jq ".latest_commits.\"$origin\"" -r)
+  new_iib_info=$(echo $new_iib_info | jq ".diffs.\"$origin\" += $(r_output | jq -c)")
 done
 
+cl_output
+w_output $(echo $new_iib_info | jq)

@@ -1,4 +1,5 @@
 #/bin/bash
+source scripts/util.sh
 
 bundle_url=$1
 PROT="docker://"
@@ -17,15 +18,17 @@ fi
 
 # Get image manifests
 tmp_dir=$(mktemp -d)
-echo "Using $tmp_dir directory for manifests"
+log "Getting bundle $bundle_url..."
+log "Using $tmp_dir directory for manifests"
 bundle_commit=$(skopeo inspect -n $bundle_url | jq -r '.Labels | .["vcs-ref"]') 
-echo "Pulling image metadata..."
+log "Pulling image metadata..."
 skopeo copy $bundle_url "dir://${tmp_dir}"
 
 # Get last layer from image
 # It contains the csv layer
-layer_sha=$(cat $tmp_dir/manifest.json | jq -r '.layers | last | .digest')
-echo "Layer containing the csv: $layer_sha"
+layer_sha=$(cat $tmp_dir/manifest.json | jq '.layers | last | .digest' -r)
+log "Layer containing the csv: $layer_sha"
+log "Extracting components..."
 
 # Split the format "sha256:1234..." into ["sha256", "1234..."] and get only the hash
 IFS=':'
@@ -39,9 +42,16 @@ IFS=''
 component_images=$(cat $tmp_dir/manifests/*.clusterserviceversion.yaml | yq -r '.spec.install.spec.deployments[0].spec.template.spec.containers[0].env | .[] | select(.value|tostring | test("^quay") or test("^registry")) | [.name + ": " + .value] | .[]')
 operator_image=$(cat $tmp_dir/manifests/*.clusterserviceversion.yaml | yq -r '.spec.install.spec.deployments[0].spec.template.spec.containers[0].image')
 
-echo "### RESULT ###"
-echo "$component_images"
-echo "OPERATOR_IMAGE: $operator_image"
+# clear output file
+cl_output
+log "### RESULT ###"
+
+# Add operator image to others
+# Line break here is important
+component_images+="
+OPERATOR_IMAGE: "$operator_image
+# convert output to json
+w_output $(ytj $component_images) 
 
 # Remove created temporary directory
 rm -rf $tmp_dir

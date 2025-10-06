@@ -11,6 +11,7 @@ if [[ -z $1 ]]; then
 fi
 
 oc annotate components/forklift-api-$version build.appstudio.openshift.io/request=trigger-pac-build
+oc annotate components/forklift-cli-download-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/forklift-console-plugin-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/forklift-controller-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/forklift-must-gather-$version build.appstudio.openshift.io/request=trigger-pac-build

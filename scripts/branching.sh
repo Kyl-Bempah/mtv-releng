@@ -28,7 +28,7 @@ fork_forklift_must_gather_url="git@github.com:solenoci/forklift-must-gather.git"
 cleanup="true"
 
 # Modify release.conf file with user input values
-release_conf () {
+release_conf_forklift () {
 cat << EOF > build/release.conf
 # Global version specifying version for every component and for bundle, format "x.y.z"
 VERSION=$version
@@ -50,23 +50,64 @@ OCP_VERSIONS=$ocp_versions
 EOF
 }
 
+# Modify release.conf file with user input values
+release_conf_console_plugin () {
+cat << EOF > build/release.conf
+# Global version specifying version for every component and for bundle, format "x.y.z"
+RVERSION=$version
+
+# Release version, format "vX.Y"
+RELEASE=$release
+
+# Operator channel where the version will be deployed, e.g. dev-preview, release-v2.9 ...
+CHANNEL=$channel
+
+# Default operator channel for other operators to pull from, if they depend on MTV
+DEFAULT_CHANNEL=$def_channel
+
+# Registry where all components should be released to, for dev-preview -> mtv-candidate, for release-X.Y -> migration-toolkit-virtualization
+REGISTRY=$registry
+EOF
+}
+
+# Modify release.conf file with user input values
+release_conf_must_gather () {
+cat << EOF > build/release.conf
+# Global version specifying version for every component and for bundle, format "x.y.z"
+VERSION=$version
+
+# Release version, format "vX.Y"
+RELEASE=$release
+
+# Operator channel where the version will be deployed, e.g. dev-preview, release-v2.9 ...
+CHANNEL=$channel
+
+# Default operator channel for other operators to pull from, if they depend on MTV
+DEFAULT_CHANNEL=$def_channel
+
+# Registry where all components should be released to, for dev-preview -> mtv-candidate, for release-X.Y -> migration-toolkit-virtualization
+REGISTRY=$registry
+EOF
+}
+
 # Process git repository and modify needed things
 process_repo () {
     # Create a release branch, example: release-2.9
-    git checkout -b release-${version:0:-2}
+    git checkout -b release-${version%.*}
     echo "Will create a new release branch from main and push it to remote without any changes..."
     read -p "Continue? (Y/N): " confirm 
     if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-        git push origin release-${version:0:-2}
-        echo "release-${version:0:-2} branch was created in remote repository..."
+        git push origin release-${version%.*}
+        echo "release-${version%.*} branch was created in remote repository..."
     else
         echo "Skipped push to remote repository, you can still create the branch manually..."
     fi
-    
+
     git checkout -b CF-$version
 
     # Modify release.conf file
-    release_conf
+    release_conf=$1
+    $release_conf
 
     # Rename all files in .tekton/ to include the version instead of dev-preview, example: virt-v2v-dev-preview-on-push.yaml -> virt-v2v-2-9-on-push.yaml
     for i in .tekton/*; do
@@ -74,15 +115,17 @@ process_repo () {
     done
 
     # The "pipelinesascode.tekton.dev/on-cel-expression" annotation in .tekton/ files should be adjusted to specify and filter by the right branch name, example: main -> release-2.9
-    sed -i -e "s/\"main\"/\"release-${version:0:-2}\"/g" .tekton/*
+    sed -i -e "s/\"main\"/\"release-${version%.*}\"/g" .tekton/*
 
     # The appstudio.openshift.io/application and appstudio.openshift.io/component labels in .tekton/ files must be adjusted to specify the right Application and Component respectively. Failing to do this will cause builds of the pipeline to be associated with the wrong application or component. example: forklift-operator-dev-preview -> forklift-operator-2-9
     sed -i -e "s/dev-preview/$version_name/g" .tekton/*
 
-    sed -i -e "s/dev-preview/$version_name/g" build/forklift-operator-bundle/images.conf
-
-    git add .tekton/ build/release.conf build/forklift-operator-bundle/images.conf
-    git commit -sm "Code freeze for ${version:0:-2}"
+    if [[ "$release_conf" == "forklift" ]]; then
+      sed -i -e "s/dev-preview/$version_name/g" build/forklift-operator-bundle/images.conf
+      git add build/forklift-operator-bundle/images.conf
+    fi
+    git add .tekton/ build/release.conf     
+    git commit -sm "Code freeze for ${version%.*}"
 
     read -p "Do you want to see what changes were made? (Y/N): " confirm 
     if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
@@ -93,7 +136,7 @@ process_repo () {
     read -p "Continue? (Y/N): " confirm 
     if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
         git push fork CF-$version
-        echo "You can now create a PR from the 'CF-$version' into release-${version:0:-2} branch"
+        echo "You can now create a PR from the 'CF-$version' into release-${version%.*} branch"
     else
         echo "Skipped push to remote repository, you can still push manually from working dir..."
     fi
@@ -142,7 +185,7 @@ echo "OCP_VERSIONS: $ocp_versions"
 read -p "Continue? (Y/N): " confirm && [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]] || exit 1
 
 version_name=${version/./-}
-version_name=${version_name:0:-2}
+version_name=${version_name%.*}
 
 
 
@@ -153,7 +196,7 @@ if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
     git clone $forklift_url
     cd forklift
     git remote add fork $fork_forklift_url
-    process_repo
+    process_repo release_conf_forklift
     cd ..
 fi
 
@@ -162,7 +205,7 @@ if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
     git clone $forklift_console_plugin_url
     cd forklift-console-plugin
     git remote add fork $fork_forklift_console_plugin_url
-    process_repo
+    process_repo release_conf_console_plugin
     cd ..
 fi
 
@@ -171,7 +214,7 @@ if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
     git clone $forklift_must_gather_url
     cd forklift-must-gather
     git remote add fork $fork_forklift_must_gather_url
-    process_repo
+    process_repo release_conf_must_gather
     cd ..
 fi
 
@@ -210,11 +253,11 @@ spec:
     name: forklift-operator-template
     values:
       - name: version
-        value: "${version:0:-2}"
+        value: "${version%.*}"
       - name: versionName
         value: "$version_name"
       - name: revision
-        value: "release-${version:0:-2}"
+        value: "release-${version%.*}"
 EOF
 
 # Go to our tenant
@@ -236,14 +279,14 @@ sed -i -e "s/mtv-candidate/$registry/g" forklift-operator-rpa-prod-$version_name
 
 # Update product_version in stage RPAs
 for i in forklift-operator-rpa-stage-$version_name-*; do
-    sed "/product_version/s/      product_version: \"[0-9].[0.9]\"/      product_version: \"${version:0:-2}\"/" $i > $i-replace
+    sed "/product_version/s/      product_version: \"[0-9].[0.9]\"/      product_version: \"${version%.*}\"/" $i > $i-replace
     rm $i
     mv $i-replace $i
 done
 
 # Update product_version in prod RPAs
 for i in forklift-operator-rpa-prod-$version_name-*; do
-    sed "/product_version/s/      product_version: \"[0-9].[0.9]\"/      product_version: \"${version:0:-2}\"/" $i > $i-replace
+    sed "/product_version/s/      product_version: \"[0-9].[0.9]\"/      product_version: \"${version%.*}\"/" $i > $i-replace
     rm $i
     mv $i-replace $i
 done
@@ -268,7 +311,7 @@ if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
 fi
 
 git add config/ tenants-config/
-git commit -sm "MTV: Add new stream for ${version:0:-2}"
+git commit -sm "MTV: Add new PDS for ${version%.*}"
 
 read -p "Do you want to see what changes were made? (Y/N): " confirm 
 if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
