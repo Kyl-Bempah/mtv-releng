@@ -41,8 +41,8 @@ Environment variables required:
   JENKINS_TOKEN    Jenkins API token
 
 Examples:
-  $SCRIPT_NAME "my-iib" "2.9.3" "4.20,4.19" "false"
-  $SCRIPT_NAME "iib-123" "2.9.3" "4.20" "true"
+  $SCRIPT_NAME "forklift-fbc-prod-v420:on-pr-xxxxx" "2.9.3" "4.20,4.19" "false"
+  $SCRIPT_NAME "forklift-fbc-prod-v420:sha-xxxxx" "2.9.3" "4.20" "true"
 EOF
     exit 1
 }
