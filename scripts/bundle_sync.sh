@@ -8,11 +8,21 @@ set -e
 # Source utility functions
 source scripts/util.sh
 
-# Configuration
-FORKLIFT_REPO="https://github.com/kubev2v/forklift.git"
-FORKLIFT_REPO_NAME="kubev2v/forklift"
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+# ============================================================================
+# Configuration Variables (can be overridden externally)
+# ============================================================================
+
+# Base URL pattern for Containerfile-downstream
+# Use {BRANCH} as a placeholder that will be replaced with the actual branch
+: "${CONTAINERFILE_BASE_URL:=https://raw.githubusercontent.com/kubev2v/forklift}"
+: "${CONTAINERFILE_PATH:=build/forklift-operator-bundle/Containerfile-downstream}"
+
+# Extraction script paths
+: "${LATEST_SNAPSHOT_SCRIPT:=./scripts/latest_snapshot.sh}"
+: "${SNAPSHOT_CONTENT_SCRIPT:=./scripts/snapshot_content.sh}"
+
+# ============================================================================
+
 
 # Function to print usage
 usage() {
@@ -30,34 +40,14 @@ usage() {
     exit 1
 }
 
-# Function to validate required tools and authenticate
-validate_tools() {
-    local missing_tools=()
-    
-    for tool in oc jq yq gh git; do
-        if ! command -v "$tool" &> /dev/null; then
-            missing_tools+=("$tool")
-        fi
-    done
-    
-    if [ ${#missing_tools[@]} -ne 0 ]; then
-        log "ERROR: Missing required tools: ${missing_tools[*]}"
-        log "Please install the missing tools and try again."
-        exit 1
-    fi
-    
-    # Use existing auth script for authentication
-    log "Setting up authentication using existing auth script..."
-    source scripts/auth.sh || log "Warning: Some authentication steps failed, continuing..."
-}
 
 # Function to get latest snapshot using existing script
 get_latest_snapshot() {
     local version="$1"
     
-    # Use the existing latest_snapshot.sh script
+    # Use the configured snapshot script
     local snapshot_name
-    snapshot_name=$(./scripts/latest_snapshot.sh "$version" 2>/dev/null)
+    snapshot_name=$("$LATEST_SNAPSHOT_SCRIPT" "$version" 2>/dev/null)
     
     if [ -z "$snapshot_name" ]; then
         echo "ERROR: No snapshot found for version: $version" >&2
@@ -71,9 +61,9 @@ get_latest_snapshot() {
 extract_sha_references() {
     local snapshot_name="$1"
     
-    # Use the existing snapshot_content.sh script to get component data
+    # Use the configured snapshot content script
     local snapshot_data
-    snapshot_data=$(./scripts/snapshot_content.sh "$snapshot_name" 2>/dev/null)
+    snapshot_data=$("$SNAPSHOT_CONTENT_SCRIPT" "$snapshot_name" 2>/dev/null)
     
     # Create a mapping of component names to SHA references using jq
     local sha_mapping="{}"
@@ -87,7 +77,7 @@ extract_sha_references() {
         
         # Extract SHA from container image using sed
         local sha=""
-        sha=$(echo "$container_image" | sed 's/.*@sha256:\([a-f0-9]\{64\}\).*/\1/' 2>/dev/null)
+        sha=${container_image##*sha256:}
         
         # Verify we got a valid SHA (64 hex characters)
         if [[ ! "$sha" =~ ^[a-f0-9]{64}$ ]]; then
@@ -155,8 +145,8 @@ update_containerfile_shas() {
     
     log "Updating Containerfile-downstream files with new SHA references"
     
-    # Download the latest Containerfile-downstream from GitHub using the target branch
-    local containerfile_url="https://raw.githubusercontent.com/kubev2v/forklift/${target_branch}/build/forklift-operator-bundle/Containerfile-downstream"
+    # Build the containerfile URL using the configured variables
+    local containerfile_url="${CONTAINERFILE_BASE_URL}/${target_branch}/${CONTAINERFILE_PATH}"
     local temp_containerfile="/tmp/Containerfile-downstream-$$"
     
     log "Downloading latest Containerfile-downstream from GitHub branch: $target_branch"
@@ -323,7 +313,7 @@ main() {
     
     local version="$1"
     local target_branch="${2:-main}"
-    local dry_run="${3:-false}"
+    local dry_run="${3:-true}"
     
     # Validate tools
     validate_tools
@@ -345,10 +335,6 @@ main() {
     local sha_mapping
     sha_mapping=$(extract_sha_references "$snapshot_name")
     
-    # Log the results
-    local sha_count=$(echo "$sha_mapping" | jq 'keys | length' 2>/dev/null || echo "0")
-    log "Found $sha_count components with SHA references (bundle component excluded)"
-    
     log "SHA mapping extracted:"
     if echo "$sha_mapping" | jq . >/dev/null 2>&1; then
         echo "$sha_mapping" | jq .
@@ -357,6 +343,10 @@ main() {
         log "SHA mapping content: $sha_mapping"
         return 1
     fi
+
+    # Log the results
+    local sha_count=$(echo "$sha_mapping" | jq 'keys | length' 2>/dev/null || echo "0")
+    log "Found $sha_count components with SHA references (bundle component excluded)"
     
     # Update Containerfile-downstream files
     if update_containerfile_shas "$sha_mapping" "$dry_run" "$target_branch"; then

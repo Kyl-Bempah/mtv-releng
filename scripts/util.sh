@@ -97,3 +97,20 @@ function rm_temp_dir {
     rm -rf temp-$mtv_worker_id
   fi
 }
+
+# Function to validate required tools
+function validate_tools {
+    local missing_tools=()
+    
+    for tool in oc jq yq gh git; do
+        if ! command -v "$tool" &> /dev/null; then
+            missing_tools+=("$tool")
+        fi
+    done
+    
+    if [ ${#missing_tools[@]} -ne 0 ]; then
+        log "ERROR: Missing required tools: ${missing_tools[*]}"
+        log "Please install the missing tools and try again."
+        exit 1
+    fi
+}
