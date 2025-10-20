@@ -85,16 +85,24 @@ jenkins_api_call() {
     local url="$1"
     local data="$2"
     local method="${3:-GET}"  # Default to GET, allow POST to be specified
+    local include_headers="${4:-false}"  # Whether to include headers in response
     
     if [ -n "$data" ] && [ "$method" = "POST" ]; then
         # For POST requests with data (job triggering)
-		curl -s -S -f -i --insecure --connect-timeout 15 --max-time 60 -X POST \
-            --user "$JENKINS_USER:$JENKINS_TOKEN" \
-            --data-urlencode "$data" \
-            "$url"
+        if [ "$include_headers" = "true" ]; then
+            curl -s -S -f -i --insecure --connect-timeout 15 --max-time 60 -X POST \
+                --user "$JENKINS_USER:$JENKINS_TOKEN" \
+                --data-urlencode "$data" \
+                "$url"
+        else
+            curl -s -S -f --insecure --connect-timeout 15 --max-time 60 -X POST \
+                --user "$JENKINS_USER:$JENKINS_TOKEN" \
+                --data-urlencode "$data" \
+                "$url"
+        fi
     else
         # For GET requests (status checks)
-		curl -s -S -f --insecure --connect-timeout 15 --max-time 60 \
+        curl -s -S -f --insecure --connect-timeout 15 --max-time 60 \
             --user "$JENKINS_USER:$JENKINS_TOKEN" \
             "$url"
     fi
@@ -175,12 +183,16 @@ trigger_jenkins_job() {
     
     # Trigger the job
     local response
-    response=$(jenkins_api_call "$job_url" "json=${json_params}" "POST")
+    if ! response=$(jenkins_api_call "$job_url" "json=${json_params}" "POST" "true"); then
+        log_error "Failed to trigger Jenkins job for OCP version: $openshift_version"
+        return 1
+    fi
     
     # Extract job number
     local job_number
     if ! job_number=$(extract_job_number "$response"); then
         log_error "Failed to extract job number from Jenkins response"
+        log_error "Response: $response"
         return 1
     fi
     
@@ -204,7 +216,11 @@ check_job_status() {
         local queue_url="${JENKINS_BASE_URL}/queue/item/${queue_item}/api/json"
         
         local queue_response
-        queue_response=$(jenkins_api_call "$queue_url" "")
+        if ! queue_response=$(jenkins_api_call "$queue_url" ""); then
+            log_warning "Failed to check queue status for job: $job_name"
+            echo "$STATUS_UNKNOWN"
+            return
+        fi
         
         if [ -z "$queue_response" ]; then
             echo "$STATUS_UNKNOWN"
@@ -219,8 +235,9 @@ check_job_status() {
             log_info "Job started with build number: $build_number"
             # Update the stored job number
             local job_info="${JOB_TRACKING[$job_name]}"
-            local job_url="${job_info#*|}"
-            local ocp_version="${job_url#*|}"
+            local old_job_number="${job_info%%|*}"
+            local old_job_url="${job_info#*|}"
+            local ocp_version="${old_job_url##*|}"  # Get everything after the last |
             JOB_TRACKING["$job_name"]="${build_number}|${JENKINS_BASE_URL}/job/${job_name}/${build_number}/|${ocp_version}"
             job_number="$build_number"
         else
@@ -232,7 +249,11 @@ check_job_status() {
     # Check job status
     local status_url="${JENKINS_BASE_URL}/job/${job_name}/${job_number}/api/json"
     local status_response
-    status_response=$(jenkins_api_call "$status_url" "")
+    if ! status_response=$(jenkins_api_call "$status_url" ""); then
+        log_warning "Failed to check job status for: $job_name #$job_number"
+        echo "$STATUS_UNKNOWN"
+        return
+    fi
     
     if [ -z "$status_response" ]; then
         echo "$STATUS_UNKNOWN"
@@ -240,7 +261,16 @@ check_job_status() {
     fi
     
     local status
-    status=$(echo "$status_response" | jq -r '.result // "RUNNING"' 2>/dev/null || echo "$STATUS_UNKNOWN")
+    # Check if the job is still building/running
+    local building
+    building=$(echo "$status_response" | jq -r '.building // false' 2>/dev/null || echo "false")
+    
+    if [ "$building" = "true" ]; then
+        status="$STATUS_RUNNING"
+    else
+        # Job is not building, check the result
+        status=$(echo "$status_response" | jq -r '.result // "UNKNOWN"' 2>/dev/null || echo "$STATUS_UNKNOWN")
+    fi
     
     echo "$status"
 }
@@ -253,6 +283,8 @@ wait_for_jobs() {
     
     while true; do
         local all_complete=true
+        local running_jobs=0
+        local completed_jobs=0
         
         for job_name in "${!JOB_TRACKING[@]}"; do
             local job_info="${JOB_TRACKING[$job_name]}"
@@ -263,7 +295,9 @@ wait_for_jobs() {
             
             if [[ "$status" == "$STATUS_RUNNING" || "$status" == "$STATUS_UNKNOWN" || "$status" == "$STATUS_QUEUED" ]]; then
                 all_complete=false
-                break
+                running_jobs=$((running_jobs + 1))
+            else
+                completed_jobs=$((completed_jobs + 1))
             fi
         done
         
@@ -280,9 +314,16 @@ wait_for_jobs() {
             break
         fi
         
-        log_info "Jobs still running... waiting $((POLL_INTERVAL / 60)) minutes"
+        log_info "Jobs status: $completed_jobs completed, $running_jobs still running... waiting $((POLL_INTERVAL / 60)) minutes"
         sleep $POLL_INTERVAL
     done
+}
+
+# Function to escape JSON string
+escape_json_string() {
+    local str="$1"
+    # Escape backslashes, quotes, and newlines
+    echo "$str" | sed 's/\\/\\\\/g; s/"/\\"/g; s/\n/\\n/g; s/\r/\\r/g; s/\t/\\t/g'
 }
 
 # Function to generate JSON output
@@ -292,18 +333,27 @@ generate_json_output() {
     local rc="$3"
     local iib="$4"
     
-    local json="{\"mtv_version\":\"$mtv_version\",\"dev_preview\":$dev_preview,\"rc\":$rc,\"iib\":\"$iib\",\"results\":["
+    # Escape input strings
+    local escaped_mtv_version=$(escape_json_string "$mtv_version")
+    local escaped_iib=$(escape_json_string "$iib")
+    
+    local json="{\"mtv_version\":\"$escaped_mtv_version\",\"dev_preview\":$dev_preview,\"rc\":$rc,\"iib\":\"$escaped_iib\",\"results\":["
     
     local first=true
     for job_name in "${!JOB_TRACKING[@]}"; do
         local job_info="${JOB_TRACKING[$job_name]}"
         local job_number="${job_info%%|*}"
         local job_url="${job_info#*|}"
-        local ocp_version="${job_url#*|}"
-        local job_url_only="${job_url%|*}"
+        local ocp_version="${job_url##*|}"  # Get everything after the last |
+        local job_url_only="${job_url%|*}"  # Get everything before the last |
         
         local final_status
         final_status=$(check_job_status "$job_name" "$job_number")
+        
+        # Escape strings for JSON
+        local escaped_ocp_version=$(escape_json_string "$ocp_version")
+        local escaped_status=$(escape_json_string "$final_status")
+        local escaped_url=$(escape_json_string "$job_url_only")
         
         if [ "$first" = true ]; then
             first=false
@@ -311,11 +361,75 @@ generate_json_output() {
             json+=","
         fi
         
-        json+="{\"ocp_version\":\"$ocp_version\",\"status\":\"$final_status\",\"url\":\"$job_url_only\"}"
+        json+="{\"ocp_version\":\"$escaped_ocp_version\",\"status\":\"$escaped_status\",\"url\":\"$escaped_url\"}"
     done
     
     json+="]}"
     echo "$json"
+}
+
+# Function to validate job results
+validate_job_results() {
+    local failed_jobs=0
+    local success_jobs=0
+    local unknown_jobs=0
+    local failed_job_details=()
+    local unknown_job_details=()
+    
+    for job_name in "${!JOB_TRACKING[@]}"; do
+        local job_info="${JOB_TRACKING[$job_name]}"
+        local job_number="${job_info%%|*}"
+        local job_url="${job_info#*|}"
+        local ocp_version="${job_url##*|}"  # Get everything after the last |
+        local job_url_only="${job_url%|*}"  # Get everything before the last |
+        
+        local final_status
+        final_status=$(check_job_status "$job_name" "$job_number")
+        
+        case "$final_status" in
+            "$STATUS_SUCCESS")
+                success_jobs=$((success_jobs + 1))
+                ;;
+            "$STATUS_FAILURE"|"$STATUS_ABORTED")
+                failed_jobs=$((failed_jobs + 1))
+                failed_job_details+=("OCP $ocp_version: $final_status - $job_url_only")
+                ;;
+            *)
+                unknown_jobs=$((unknown_jobs + 1))
+                unknown_job_details+=("OCP $ocp_version: $final_status - $job_url_only")
+                ;;
+        esac
+    done
+    
+    log_info "Job Results Summary: $success_jobs succeeded, $failed_jobs failed, $unknown_jobs unknown"
+    
+    # Display detailed error information
+    if [ $failed_jobs -gt 0 ]; then
+        echo
+        log_error "FAILED JOBS:"
+        echo "============="
+        for job_detail in "${failed_job_details[@]}"; do
+            echo -e "${RED}✗ $job_detail${NC}"
+        done
+        echo
+    fi
+    
+    if [ $unknown_jobs -gt 0 ]; then
+        echo
+        log_warning "UNKNOWN STATUS JOBS:"
+        echo "====================="
+        for job_detail in "${unknown_job_details[@]}"; do
+            echo -e "${YELLOW}? $job_detail${NC}"
+        done
+        echo
+    fi
+    
+    # Return non-zero if any jobs failed or have unknown status
+    if [ $failed_jobs -gt 0 ] || [ $unknown_jobs -gt 0 ]; then
+        return 1
+    fi
+    
+    return 0
 }
 
 # Function to display results
@@ -392,10 +506,27 @@ main() {
     display_results
     echo
     
+    # Validate job results
+    if ! validate_job_results; then
+        echo
+        log_error "OVERALL RESULT: FAILURE"
+        log_error "One or more jobs failed or have unknown status"
+        echo
+        log_info "JSON Output:"
+        echo "============"
+        generate_json_output "$MTV_VERSION" "$DEV_PREVIEW" "$RC" "$IIB"
+        echo
+        log_error "Script exiting with error code 1"
+        exit 1
+    fi
+    
     # Output JSON
     log_info "JSON Output:"
     echo "============"
     generate_json_output "$MTV_VERSION" "$DEV_PREVIEW" "$RC" "$IIB"
+    
+    log_success "All jobs completed successfully!"
+    exit 0
 }
 
 # Run main function with all arguments
