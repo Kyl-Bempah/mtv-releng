@@ -113,24 +113,36 @@ extract_job_number() {
     local response="$1"
     local location_header
     
-    location_header=$(echo "$response" | grep -i '^Location:' | head -1)
+    # Extract Location header, handling both \r\n and \n line endings
+    location_header=$(echo "$response" | grep -i '^Location:' | head -1 | tr -d '\r')
     
     if [ -z "$location_header" ]; then
         return 1
     fi
 
+    # Extract the URL from the Location header
+    local location_url
+    location_url=$(echo "$location_header" | awk '{print $2}' | tr -d '\r')
+    
+    if [ -z "$location_url" ]; then
+        return 1
+    fi
+
     # Handle direct job URLs: /job/jobname/123/
-    if echo "$location_header" | grep -q "/job/.*/[0-9]\+/"; then
-        echo "$location_header" | grep -o '/job/[^/]*/[0-9]\+/' | grep -o '[0-9]\+' | head -1
+    if echo "$location_url" | grep -qE "/job/[^/]+/[0-9]+/?$"; then
+        echo "$location_url" | grep -oE '/job/[^/]+/[0-9]+' | grep -oE '[0-9]+$'
     # Handle queue item URLs: /queue/item/123
-    elif echo "$location_header" | grep -q "/queue/item/[0-9]\+"; then
+    elif echo "$location_url" | grep -qE "/queue/item/[0-9]+/?$"; then
         local queue_item
-        queue_item=$(echo "$location_header" | grep -o '/queue/item/[0-9]\+' | grep -o '[0-9]\+')
-        log_info "Job queued with queue item: $queue_item"
-        echo "QUEUED_${queue_item}"
+        queue_item=$(echo "$location_url" | grep -oE '/queue/item/[0-9]+' | grep -oE '[0-9]+$')
+        if [ -n "$queue_item" ]; then
+            echo "QUEUED_${queue_item}"
+        else
+            return 1
+        fi
     else
-        # Fallback: extract any number
-        echo "$location_header" | grep -o '[0-9]\+' | head -1
+        # No valid job or queue URL found
+        return 1
     fi
 }
 
@@ -192,7 +204,19 @@ trigger_jenkins_job() {
     local job_number
     if ! job_number=$(extract_job_number "$response"); then
         log_error "Failed to extract job number from Jenkins response"
-        log_error "Response: $response"
+        log_error "Response headers: $(echo "$response" | head -10)"
+        return 1
+    fi
+    
+    # Validate job number format
+    if [[ "$job_number" =~ ^QUEUED_[0-9]+$ ]]; then
+        # Valid queue item format
+        :
+    elif [[ "$job_number" =~ ^[0-9]+$ ]]; then
+        # Valid job number format
+        :
+    else
+        log_error "Invalid job number format: $job_number"
         return 1
     fi
     
