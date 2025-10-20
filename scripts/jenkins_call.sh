@@ -88,13 +88,13 @@ jenkins_api_call() {
     
     if [ -n "$data" ] && [ "$method" = "POST" ]; then
         # For POST requests with data (job triggering)
-        curl -s -i --insecure -X POST \
+		curl -s -S -f -i --insecure --connect-timeout 15 --max-time 60 -X POST \
             --user "$JENKINS_USER:$JENKINS_TOKEN" \
             --data-urlencode "$data" \
             "$url"
     else
         # For GET requests (status checks)
-        curl -s --insecure \
+		curl -s -S -f --insecure --connect-timeout 15 --max-time 60 \
             --user "$JENKINS_USER:$JENKINS_TOKEN" \
             "$url"
     fi
@@ -132,8 +132,11 @@ trigger_jenkins_job() {
     local iib="$2"
     local mtv_version="$3"
     local rc="$4"
-    
-    local job_name="mtv-${mtv_version}-ocp-${openshift_version}-test-release-gate"
+	
+	# Variable creation for XY version (drop trailing .z)
+	local mtv_xy_version
+	mtv_xy_version=$(echo "$mtv_version" | awk -F. '{print $1"."$2}')
+	local job_name="mtv-${mtv_xy_version}-ocp-${openshift_version}-test-release-gate"
     local job_url="${JENKINS_BASE_URL}/job/${job_name}/build"
     
     log_info "Triggering job for OCP version: $openshift_version"
@@ -144,6 +147,7 @@ trigger_jenkins_job() {
         --arg openshift_version "$openshift_version" \
         --arg iib "$iib" \
         --arg mtv_version "$mtv_version" \
+		--arg mtv_xy_version "$mtv_xy_version" \
         --arg rc "$rc" \
         '{
             "parameter": [
@@ -164,7 +168,7 @@ trigger_jenkins_job() {
                 {"name": "OPENSHIFT_PYTHON_WRAPPER_GIT_BRANCH", "value": "main"},
                 {"name": "PYTEST_EXTRA_PARAMS", "value": ("--tc=release_test:true --tc=target_ocp_version:" + $openshift_version)},
                 {"name": "OCP_XY_VERSION", "value": $openshift_version},
-                {"name": "MTV_XY_VERSION", "value": $mtv_version},
+				{"name": "MTV_XY_VERSION", "value": $mtv_xy_version},
                 {"name": "MATRIX_TYPE", "value": "RELEASE"}
             ]
         }')
