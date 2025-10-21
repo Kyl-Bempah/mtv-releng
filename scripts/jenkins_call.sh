@@ -23,7 +23,97 @@ readonly STATUS_FAILURE="FAILURE"
 readonly STATUS_ABORTED="ABORTED"
 
 # Global variables
-declare -A JOB_TRACKING  # Associative array: job_name -> "job_number|job_url|ocp_version"
+declare -A JOB_TRACKING  # Associative array: job_name -> "job_number|job_url|ocp_version|trigger_time"
+declare -A TRIGGER_TIMESTAMPS  # Track when each job was triggered
+
+# Helper function to parse job information
+parse_job_info() {
+    local job_info="$1"
+    local job_number="${job_info%%|*}"
+    local remaining="${job_info#*|}"
+    local job_url="${remaining%|*}"
+    local last_part="${remaining##*|}"
+    # Handle both old format (ocp_version) and new format (ocp_version|trigger_time)
+    if [[ "$last_part" =~ ^[0-9]+\.[0-9]+$ ]]; then
+        # Old format: job_number|job_url|ocp_version
+        local ocp_version="$last_part"
+        echo "$job_number|$job_url|$ocp_version"
+    else
+        # New format: job_number|job_url|ocp_version|trigger_time
+        local ocp_version="${last_part%|*}"
+        local trigger_time="${last_part##*|}"
+        echo "$job_number|$job_url|$ocp_version|$trigger_time"
+    fi
+}
+
+# Function to validate that a build belongs to our triggered job
+validate_build_ownership() {
+    local job_name="$1"
+    local build_number="$2"
+    local expected_trigger_time="$3"
+    
+    # Get build details from Jenkins
+    local build_url="${JENKINS_BASE_URL}/job/${job_name}/${build_number}/api/json"
+    local build_response
+    if ! build_response=$(jenkins_api_call "$build_url" ""); then
+        return 1
+    fi
+    
+    # Extract build timestamp
+    local build_timestamp
+    build_timestamp=$(echo "$build_response" | jq -r '.timestamp // empty' 2>/dev/null)
+    if [ -z "$build_timestamp" ] || [ "$build_timestamp" = "null" ]; then
+        return 1
+    fi
+    
+    # Convert timestamps to seconds for comparison
+    local build_time_seconds=$((build_timestamp / 1000))
+    local trigger_time_seconds=$((expected_trigger_time / 1000))
+    
+    # Allow a 5-minute window for build to start after trigger
+    local time_diff=$((build_time_seconds - trigger_time_seconds))
+    if [ $time_diff -ge 0 ] && [ $time_diff -le 300 ]; then
+        return 0  # Build is within expected timeframe
+    else
+        log_warning "Build #$build_number timestamp ($build_time_seconds) doesn't match expected trigger time ($trigger_time_seconds), diff: ${time_diff}s"
+        return 1
+    fi
+}
+
+# Function to validate build parameters match our triggered job
+validate_build_parameters() {
+    local job_name="$1"
+    local build_number="$2"
+    local expected_iib="$3"
+    local expected_mtv_version="$4"
+    
+    # Get build parameters from Jenkins
+    local build_url="${JENKINS_BASE_URL}/job/${job_name}/${build_number}/api/json"
+    local build_response
+    if ! build_response=$(jenkins_api_call "$build_url" ""); then
+        return 1
+    fi
+    
+    # Extract parameters
+    local build_iib
+    build_iib=$(echo "$build_response" | jq -r '.actions[].parameters[]? | select(.name=="IIB_NO") | .value // empty' 2>/dev/null | head -1)
+    local build_mtv_version
+    build_mtv_version=$(echo "$build_response" | jq -r '.actions[].parameters[]? | select(.name=="MTV_VERSION") | .value // empty' 2>/dev/null | head -1)
+    
+    # Validate IIB matches
+    if [ -n "$build_iib" ] && [ "$build_iib" = "$expected_iib" ]; then
+        # Validate MTV version matches
+        if [ -n "$build_mtv_version" ] && [ "$build_mtv_version" = "$expected_mtv_version" ]; then
+            return 0  # Parameters match
+        else
+            log_warning "Build #$build_number MTV version ($build_mtv_version) doesn't match expected ($expected_mtv_version)"
+            return 1
+        fi
+    else
+        log_warning "Build #$build_number IIB ($build_iib) doesn't match expected ($expected_iib)"
+        return 1
+    fi
+}
 
 # Function to display usage
 usage() {
@@ -140,6 +230,15 @@ extract_job_number() {
         else
             return 1
         fi
+    # Handle job URLs without build number: /job/jobname/ (job was queued)
+    elif echo "$location_url" | grep -qE "/job/[^/]+/?$"; then
+        # Extract job name from URL
+        local job_name
+        job_name=$(echo "$location_url" | grep -oE '/job/[^/]+' | sed 's|/job/||')
+        
+        # For buildWithParameters, we should get a queue item, but if we get a job URL,
+        # it means the job was triggered but we need to wait for it to start
+        echo "PENDING_${job_name}"
     else
         # No valid job or queue URL found
         return 1
@@ -157,7 +256,7 @@ trigger_jenkins_job() {
 	local mtv_xy_version
 	mtv_xy_version=$(echo "$mtv_version" | awk -F. '{print $1"."$2}')
 	local job_name="mtv-${mtv_xy_version}-ocp-${openshift_version}-test-release-gate"
-    local job_url="${JENKINS_BASE_URL}/job/${job_name}/build"
+    local job_url="${JENKINS_BASE_URL}/job/${job_name}/buildWithParameters"
     
     log_info "Triggering job for OCP version: $openshift_version"
     
@@ -205,25 +304,34 @@ trigger_jenkins_job() {
     if ! job_number=$(extract_job_number "$response"); then
         log_error "Failed to extract job number from Jenkins response"
         log_error "Response headers: $(echo "$response" | head -10)"
+        if [ "${DEBUG:-false}" = "true" ]; then
+            log_error "Full response: $response"
+        fi
         return 1
     fi
     
     # Validate job number format
-    if [[ "$job_number" =~ ^QUEUED_[0-9]+$ ]]; then
-        # Valid queue item format
-        :
-    elif [[ "$job_number" =~ ^[0-9]+$ ]]; then
-        # Valid job number format
-        :
-    else
+    if [[ ! "$job_number" =~ ^(QUEUED_[0-9]+|PENDING_.+|[0-9]+)$ ]]; then
         log_error "Invalid job number format: $job_number"
         return 1
     fi
     
-    local job_url_full="${JENKINS_BASE_URL}/job/${job_name}/${job_number}/"
+    # Construct appropriate URL based on job number type
+    local job_url_full
+    if [[ "$job_number" =~ ^(PENDING_|QUEUED_) ]]; then
+        # For pending/queued jobs, use job URL without build number
+        job_url_full="${JENKINS_BASE_URL}/job/${job_name}/"
+    else
+        # For actual build numbers, include the build number
+        job_url_full="${JENKINS_BASE_URL}/job/${job_name}/${job_number}/"
+    fi
     
-    # Store job information
-    JOB_TRACKING["$job_name"]="${job_number}|${job_url_full}|${openshift_version}"
+    # Record trigger timestamp
+    local trigger_timestamp=$(date +%s)000  # Convert to milliseconds
+    TRIGGER_TIMESTAMPS["$job_name"]="$trigger_timestamp"
+    
+    # Store job information with trigger time
+    JOB_TRACKING["$job_name"]="${job_number}|${job_url_full}|${openshift_version}|${trigger_timestamp}"
     
     log_success "Job triggered successfully. Job number: $job_number"
     return 0
@@ -234,8 +342,53 @@ check_job_status() {
     local job_name="$1"
     local job_number="$2"
     
+    # Handle pending jobs (no build number assigned yet)
+    if [[ "$job_number" =~ ^PENDING_ ]]; then
+        # Try to get the latest build number for this job
+        local job_info_url="${JENKINS_BASE_URL}/job/${job_name}/api/json"
+        local job_info_response
+        if job_info_response=$(jenkins_api_call "$job_info_url" ""); then
+            local latest_build
+            latest_build=$(echo "$job_info_response" | jq -r '.lastBuild.number // empty' 2>/dev/null)
+            if [ -n "$latest_build" ] && [ "$latest_build" != "null" ]; then
+                # Check if this is a new build (not the same as what we stored)
+                local stored_job_info="${JOB_TRACKING[$job_name]}"
+                local stored_job_number="${stored_job_info%%|*}"
+                
+                # If we have a new build number, validate it belongs to our job
+                if [[ "$stored_job_number" =~ ^PENDING_ ]] || [[ "$latest_build" != "${stored_job_number#*_}" ]]; then
+                    # Parse stored info to get trigger time
+                    local parsed_stored=$(parse_job_info "$stored_job_info")
+                    local stored_trigger_time="${parsed_stored##*|}"
+                    
+                    # Validate this build belongs to our triggered job
+                    if validate_build_ownership "$job_name" "$latest_build" "$stored_trigger_time"; then
+                        log_info "Job started with build number: $latest_build (validated ownership)"
+                        # Update the stored job number
+                        local old_job_url="${stored_job_info#*|}"
+                        local ocp_version="${old_job_url##*|}"  # Get everything after the last |
+                        JOB_TRACKING["$job_name"]="${latest_build}|${JENKINS_BASE_URL}/job/${job_name}/${latest_build}/|${ocp_version}"
+                        job_number="$latest_build"
+                    else
+                        log_warning "Build #$latest_build doesn't belong to our triggered job, continuing to wait..."
+                        echo "$STATUS_QUEUED"
+                        return
+                    fi
+                else
+                    # Still waiting for a new build
+                    echo "$STATUS_QUEUED"
+                    return
+                fi
+            else
+                echo "$STATUS_QUEUED"
+                return
+            fi
+        else
+            echo "$STATUS_UNKNOWN"
+            return
+        fi
     # Handle queued jobs
-    if [[ "$job_number" =~ ^QUEUED_ ]]; then
+    elif [[ "$job_number" =~ ^QUEUED_ ]]; then
         local queue_item="${job_number#QUEUED_}"
         local queue_url="${JENKINS_BASE_URL}/queue/item/${queue_item}/api/json"
         
@@ -251,20 +404,41 @@ check_job_status() {
             return
         fi
         
+        # Debug: log queue response for troubleshooting (only if DEBUG is set)
+        if [ "${DEBUG:-false}" = "true" ]; then
+            log_info "Queue response for $job_name: $(echo "$queue_response" | jq -c . 2>/dev/null || echo "$queue_response")"
+        fi
+        
         # Check if job has been assigned a build number
         local build_number
         build_number=$(echo "$queue_response" | jq -r '.executable.number // empty' 2>/dev/null)
         
         if [ -n "$build_number" ] && [ "$build_number" != "null" ]; then
-            log_info "Job started with build number: $build_number"
-            # Update the stored job number
+            # Validate this build belongs to our triggered job
             local job_info="${JOB_TRACKING[$job_name]}"
-            local old_job_number="${job_info%%|*}"
-            local old_job_url="${job_info#*|}"
-            local ocp_version="${old_job_url##*|}"  # Get everything after the last |
-            JOB_TRACKING["$job_name"]="${build_number}|${JENKINS_BASE_URL}/job/${job_name}/${build_number}/|${ocp_version}"
-            job_number="$build_number"
+            local parsed_info=$(parse_job_info "$job_info")
+            local stored_trigger_time="${parsed_info##*|}"
+            
+            if validate_build_ownership "$job_name" "$build_number" "$stored_trigger_time"; then
+                log_info "Job started with build number: $build_number (validated ownership)"
+                # Update the stored job number
+                local old_job_number="${job_info%%|*}"
+                local old_job_url="${job_info#*|}"
+                local ocp_version="${old_job_url##*|}"  # Get everything after the last |
+                JOB_TRACKING["$job_name"]="${build_number}|${JENKINS_BASE_URL}/job/${job_name}/${build_number}/|${ocp_version}"
+                job_number="$build_number"
+            else
+                log_warning "Build #$build_number doesn't belong to our triggered job, continuing to wait..."
+                echo "$STATUS_QUEUED"
+                return
+            fi
         else
+            # Check if job is still in queue or has an error
+            local why
+            why=$(echo "$queue_response" | jq -r '.why // empty' 2>/dev/null)
+            if [ -n "$why" ] && [ "$why" != "null" ]; then
+                log_info "Job still in queue: $why"
+            fi
             echo "$STATUS_QUEUED"
             return
         fi
@@ -312,7 +486,8 @@ wait_for_jobs() {
         
         for job_name in "${!JOB_TRACKING[@]}"; do
             local job_info="${JOB_TRACKING[$job_name]}"
-            local job_number="${job_info%%|*}"
+            local parsed_info=$(parse_job_info "$job_info")
+            local job_number="${parsed_info%%|*}"
             local status
             
             status=$(check_job_status "$job_name" "$job_number")
@@ -366,10 +541,10 @@ generate_json_output() {
     local first=true
     for job_name in "${!JOB_TRACKING[@]}"; do
         local job_info="${JOB_TRACKING[$job_name]}"
-        local job_number="${job_info%%|*}"
-        local job_url="${job_info#*|}"
-        local ocp_version="${job_url##*|}"  # Get everything after the last |
-        local job_url_only="${job_url%|*}"  # Get everything before the last |
+        local parsed_info=$(parse_job_info "$job_info")
+        local job_number="${parsed_info%%|*}"
+        local job_url_only="${parsed_info#*|}"
+        local ocp_version="${parsed_info##*|}"
         
         local final_status
         final_status=$(check_job_status "$job_name" "$job_number")
@@ -402,10 +577,10 @@ validate_job_results() {
     
     for job_name in "${!JOB_TRACKING[@]}"; do
         local job_info="${JOB_TRACKING[$job_name]}"
-        local job_number="${job_info%%|*}"
-        local job_url="${job_info#*|}"
-        local ocp_version="${job_url##*|}"  # Get everything after the last |
-        local job_url_only="${job_url%|*}"  # Get everything before the last |
+        local parsed_info=$(parse_job_info "$job_info")
+        local job_number="${parsed_info%%|*}"
+        local job_url_only="${parsed_info#*|}"
+        local ocp_version="${parsed_info##*|}"
         
         local final_status
         final_status=$(check_job_status "$job_name" "$job_number")
@@ -463,10 +638,10 @@ display_results() {
     
     for job_name in "${!JOB_TRACKING[@]}"; do
         local job_info="${JOB_TRACKING[$job_name]}"
-        local job_number="${job_info%%|*}"
-        local job_url="${job_info#*|}"
-        local ocp_version="${job_url#*|}"
-        local job_url_only="${job_url%|*}"
+        local parsed_info=$(parse_job_info "$job_info")
+        local job_number="${parsed_info%%|*}"
+        local job_url_only="${parsed_info#*|}"
+        local ocp_version="${parsed_info##*|}"
         
         local final_status
         final_status=$(check_job_status "$job_name" "$job_number")
