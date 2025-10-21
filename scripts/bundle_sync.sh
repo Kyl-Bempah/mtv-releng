@@ -17,9 +17,15 @@ source scripts/util.sh
 : "${CONTAINERFILE_BASE_URL:=https://raw.githubusercontent.com/kubev2v/forklift}"
 : "${CONTAINERFILE_PATH:=build/forklift-operator-bundle/Containerfile-downstream}"
 
+# Target repository for PR creation
+: "${TARGET_REPO:=Kyl-Bempah/forklift}"
+
 # Extraction script paths
 : "${LATEST_SNAPSHOT_SCRIPT:=./scripts/latest_snapshot.sh}"
 : "${SNAPSHOT_CONTENT_SCRIPT:=./scripts/snapshot_content.sh}"
+
+# Component mapping configuration file
+: "${COMPONENT_MAPPINGS_FILE:=./scripts/component_mappings.conf}"
 
 # ============================================================================
 
@@ -32,6 +38,10 @@ usage() {
     echo "  version       - Version to get snapshot for (e.g., '2-10', 'dev-preview')"
     echo "  target_branch - Target branch for PR (default: 'main')"
     echo "  dry_run       - Set to 'true' to only show what would be changed (default: 'false')"
+    echo ""
+    echo "Environment Variables:"
+    echo "  TARGET_REPO              - Target repository for PR creation (default: 'kubev2v/forklift')"
+    echo "  COMPONENT_MAPPINGS_FILE  - Component mapping configuration file (default: './scripts/component_mappings.conf')"
     echo ""
     echo "Examples:"
     echo "  $0 2-10"
@@ -103,37 +113,44 @@ get_arg_name_for_component() {
     local component="$1"
     local containerfile="$2"
     
-    # Handle specific known mappings first
-    case "$component" in
-        *"console-plugin"*)
-            echo "UI_PLUGIN_IMAGE"
-            return 0
-            ;;
-        *"populator-controller"*)
-            echo "POPULATOR_CONTROLLER_IMAGE"
-            return 0
-            ;;
-    esac
+    # Remove version suffix to get base component name
+    # Handle patterns like: -2-10, -dev-preview, -rc1, etc.
+    local base_component="$component"
+    # Remove numeric version suffixes (e.g., -2-10, -1.0.0)
+    base_component=$(echo "$base_component" | sed 's/-[0-9].*$//')
+    # Remove common non-numeric suffixes
+    base_component=$(echo "$base_component" | sed 's/-dev-preview$//; s/-rc[0-9]*$//; s/-alpha$//; s/-beta$//; s/-stable$//')
     
-    # First, try to find existing ARG lines in the containerfile
+    # Try to find mapping in configuration file
+    if [ -f "$COMPONENT_MAPPINGS_FILE" ]; then
+        local arg_name
+        arg_name=$(grep "^${base_component}=" "$COMPONENT_MAPPINGS_FILE" 2>/dev/null | cut -d'=' -f2)
+        if [ -n "$arg_name" ]; then
+            # Check if the ARG exists in the containerfile
+            if grep -q "^ARG ${arg_name}=" "$containerfile" 2>/dev/null; then
+                echo "$arg_name"
+                return 0
+            fi
+        fi
+    fi
+    
+    # Fallback: try to find existing ARG that matches the component
     local existing_args
     existing_args=$(grep "^ARG.*_IMAGE=" "$containerfile" | sed 's/^ARG \([^=]*\)=.*/\1/' || true)
     
-    # Try to match component to existing ARG names
     for arg in $existing_args; do
         # Convert ARG name to component pattern
         local arg_pattern=$(echo "$arg" | sed 's/_IMAGE$//' | tr '_' '-' | tr '[:upper:]' '[:lower:]')
         
         # Check if component matches this ARG pattern
-        if [[ "$component" == *"$arg_pattern"* ]] || [[ "$arg_pattern" == *"$(echo "$component" | sed 's/-[0-9].*$//')"* ]]; then
+        if [[ "$base_component" == *"$arg_pattern"* ]] || [[ "$arg_pattern" == *"$base_component"* ]]; then
             echo "$arg"
             return 0
         fi
     done
     
-    # If no match found, try dynamic generation
-    local base_name=$(echo "$component" | sed 's/-[0-9].*$//' | tr '-' '_' | tr '[:lower:]' '[:upper:]')
-    echo "${base_name}_IMAGE"
+    # If no match found, return empty
+    echo ""
 }
 
 # Function to update Containerfile-downstream files
@@ -141,40 +158,63 @@ update_containerfile_shas() {
     local sha_mapping="$1"
     local dry_run="$2"
     local target_branch="$3"
+    local temp_dir="$4"
+    
     local changes_made=false
+    local updated_files=""
+    local containerfile=""
     
-    log "Updating Containerfile-downstream files with new SHA references"
-    
-    # Build the containerfile URL using the configured variables
-    local containerfile_url="${CONTAINERFILE_BASE_URL}/${target_branch}/${CONTAINERFILE_PATH}"
-    local temp_containerfile="/tmp/Containerfile-downstream-$$"
-    
-    log "Downloading latest Containerfile-downstream from GitHub branch: $target_branch"
-    log "URL: $containerfile_url"
-    if ! curl -s -o "$temp_containerfile" "$containerfile_url"; then
-        log "ERROR: Failed to download Containerfile-downstream from GitHub branch: $target_branch"
-        return 1
+    if [ "$dry_run" = "true" ]; then
+        log "DRY RUN: Analyzing Containerfile-downstream files for SHA reference updates"
+        
+        # Download file directly for dry run
+        local containerfile_url="${CONTAINERFILE_BASE_URL}/${target_branch}/${CONTAINERFILE_PATH}"
+        containerfile="/tmp/Containerfile-downstream-dry-run-$$"
+        
+        if ! curl -s -o "$containerfile" "$containerfile_url"; then
+            log "ERROR: Failed to download Containerfile-downstream from GitHub branch: $target_branch"
+            return 1
+        fi
+        if [ ! -f "$containerfile" ] || [ ! -s "$containerfile" ]; then
+            log "ERROR: Downloaded Containerfile-downstream is empty or missing"
+            rm -f "$containerfile"
+            return 1
+        fi
+    else
+        log "Updating Containerfile-downstream files with new SHA references"
+        
+        # Prepare target repository (clone and checkout)
+        prepare_target_repo "$target_branch" "$temp_dir"
+        
+        # Work with the cloned repository
+        containerfile="${temp_dir}/${CONTAINERFILE_PATH}"
+        
+        if [ ! -f "$containerfile" ]; then
+            log "ERROR: Containerfile-downstream not found at $containerfile"
+            return 1
+        fi
+        
+        # Create backup
+        local backup_file="${containerfile}.backup"
+        cp "$containerfile" "$backup_file"
     fi
     
-    if [ ! -f "$temp_containerfile" ] || [ ! -s "$temp_containerfile" ]; then
-        log "ERROR: Downloaded Containerfile-downstream is empty or missing"
-        rm -f "$temp_containerfile"
-        return 1
-    fi
-    
-    log "Processing: $containerfile_url (downloaded to $temp_containerfile)"
-    local containerfile="$temp_containerfile"
-    
-    # Create backup
-    local backup_file="${containerfile}.backup"
-    cp "$containerfile" "$backup_file"
+    log "Processing: $containerfile"
     
     # Update SHA references in the file
     local updated=false
     
+    
+    # Track components for reporting
+    local components_processed=0
+    local components_updated=0
+    local components_skipped=0
+    local components_missing=0
+    
     # Update each component's SHA reference
     for component in $(echo "$sha_mapping" | jq -r 'keys[]' 2>/dev/null); do
         local new_sha=$(echo "$sha_mapping" | jq -r --arg comp "$component" '.[$comp]' 2>/dev/null)
+        components_processed=$((components_processed + 1))
         
         # Get ARG name for this component
         local arg_name
@@ -195,6 +235,7 @@ update_containerfile_shas() {
                 # Check if the SHA is already up to date
                 if [ "$current_sha" = "$new_sha" ]; then
                     log "Skipping $arg_name - SHA already up to date ($new_sha)"
+                    components_skipped=$((components_skipped + 1))
                     continue
                 fi
                 
@@ -213,14 +254,69 @@ update_containerfile_shas() {
                     updated=true
                     log "Updated $arg_name in $containerfile"
                 fi
+                components_updated=$((components_updated + 1))
             else
-                log "ARG $arg_name not found in $containerfile, skipping"
+                log "WARNING: ARG $arg_name not found in $containerfile - component may have been removed or ARG name changed"
+                components_missing=$((components_missing + 1))
             fi
+        else
+            log "WARNING: Could not determine ARG name for component: $component - may be a new component"
+            components_missing=$((components_missing + 1))
         fi
     done
     
+    # Check for ARG lines in Containerfile that don't have corresponding components in snapshot
+    # This helps detect removed components
+    local containerfile_args
+    containerfile_args=$(grep "^ARG.*_IMAGE=" "$containerfile" | sed 's/^ARG \([^=]*\)=.*/\1/' || true)
+    local snapshot_components
+    snapshot_components=$(echo "$sha_mapping" | jq -r 'keys[]' 2>/dev/null || true)
+    
+    local orphaned_args=0
+    for arg in $containerfile_args; do
+        local found=false
+        for component in $snapshot_components; do
+            local expected_arg
+            expected_arg=$(get_arg_name_for_component "$component" "$containerfile")
+            if [ "$arg" = "$expected_arg" ]; then
+                found=true
+                break
+            fi
+        done
+        if [ "$found" = "false" ]; then
+            log "INFO: ARG $arg exists in Containerfile but has no corresponding component in snapshot - may be a removed component"
+            orphaned_args=$((orphaned_args + 1))
+        fi
+    done
+    
+    # Report component processing summary
+    log "Component processing summary:"
+    log "  - Processed: $components_processed"
+    log "  - Updated: $components_updated"
+    log "  - Skipped (up to date): $components_skipped"
+    log "  - Missing/Unknown: $components_missing"
+    log "  - Orphaned ARGs (removed components): $orphaned_args"
+    
+    
+    # Set changes_made based on whether any components were updated
+    if [ "$components_updated" -gt 0 ]; then
+        changes_made=true
+    fi
+    
+    if [ "$dry_run" = "true" ]; then
+        # Clean up temporary file
+        rm -f "$containerfile"
+        if [ "$components_updated" -eq 0 ]; then
+            log "DRY RUN: No changes needed in Containerfile-downstream files"
+        else
+            log "DRY RUN: Would have updated Containerfile-downstream files"
+        fi
+        return 0
+    fi
+    
     if [ "$updated" = true ]; then
         changes_made=true
+        updated_files="$containerfile"
         log "Updated: $containerfile"
         rm -f "${containerfile}.bak"
     else
@@ -230,20 +326,35 @@ update_containerfile_shas() {
     
     rm -f "$backup_file"
     
-    # Clean up temporary file
-    rm -f "$temp_containerfile"
-    
-    if [ "$dry_run" = "true" ]; then
-        log "DRY RUN: Would have updated Containerfile-downstream files"
-        return 0
-    fi
-    
     if [ "$changes_made" = false ]; then
         log "No changes needed in Containerfile-downstream files"
         return 1
     fi
     
+    # Return the updated files
+    echo "$updated_files"
     return 0
+}
+
+# Function to clone and prepare target repository
+prepare_target_repo() {
+    local target_branch="$1"
+    local temp_dir="$2"
+    
+    log "Cloning target repository: $TARGET_REPO"
+    cd "$temp_dir"
+    
+    # Clone the target repository
+    git clone "https://github.com/$TARGET_REPO.git" .
+    
+    # Checkout the target branch
+    git checkout "$target_branch"
+    git pull origin "$target_branch"
+    
+    # Configure git to use GitHub CLI for authentication
+    git config credential.helper 'gh auth git-credential'
+    
+    log "Repository prepared successfully"
 }
 
 # Function to create PR
@@ -251,13 +362,18 @@ create_pr() {
     local version="$1"
     local target_branch="$2"
     local dry_run="$3"
+    local updated_files="$4"
+    local temp_dir="$5"
     
     if [ "$dry_run" = "true" ]; then
-        log "DRY RUN: Would create PR for version $version against branch $target_branch"
+        log "DRY RUN: Would create PR for version $version against branch $target_branch in repo $TARGET_REPO"
         return 0
     fi
     
-    log "Creating PR for version $version against branch $target_branch"
+    log "Creating PR for version $version against branch $target_branch in repo $TARGET_REPO"
+    
+    # Change to the cloned repository directory
+    cd "$temp_dir"
     
     # Generate branch name
     local branch_name="update-sha-refs-$(date +%Y%m%d-%H%M%S)"
@@ -265,8 +381,12 @@ create_pr() {
     # Create and checkout new branch
     git checkout -b "$branch_name"
     
-    # Add changes
-    git add forklift/build/*/Containerfile-downstream
+    # Add the updated files
+    for file in $updated_files; do
+        if [ -f "$file" ]; then
+            git add "$file"
+        fi
+    done
     
     # Commit changes
     git commit -m "chore: update Containerfile-downstream SHA references from snapshot
@@ -290,6 +410,7 @@ create_pr() {
 This PR was created automatically by the mtv-releng update script."
 
     gh pr create \
+        --repo "$TARGET_REPO" \
         --title "$pr_title" \
         --body "$pr_body" \
         --base "$target_branch" \
@@ -302,6 +423,10 @@ This PR was created automatically by the mtv-releng update script."
 cleanup() {
     log "Cleaning up temporary files"
     rm -f /tmp/sha_mapping_*.json
+    if [ -n "$TEMP_DIR" ] && [ -d "$TEMP_DIR" ]; then
+        log "Cleaning up temporary directory: $TEMP_DIR"
+        rm -rf "$TEMP_DIR"
+    fi
 }
 
 # Main function
@@ -318,12 +443,17 @@ main() {
     # Validate tools
     validate_tools
     
+    # Create temporary directory for cloned repository
+    TEMP_DIR=$(mktemp -d)
+    log "Created temporary directory: $TEMP_DIR"
+    
     # Set up cleanup trap
     trap cleanup EXIT
     
     log "Starting SHA reference update process"
     log "Version: $version"
     log "Target branch: $target_branch"
+    log "Target repository: $TARGET_REPO"
     log "Dry run: $dry_run"
     
     # Get latest snapshot
@@ -349,15 +479,23 @@ main() {
     log "Found $sha_count components with SHA references (bundle component excluded)"
     
     # Update Containerfile-downstream files
-    if update_containerfile_shas "$sha_mapping" "$dry_run" "$target_branch"; then
+    local updated_files
+    updated_files=$(update_containerfile_shas "$sha_mapping" "$dry_run" "$target_branch" "$TEMP_DIR")
+    local update_result=$?
+    
+    if [ $update_result -eq 0 ]; then
         if [ "$dry_run" = "false" ]; then
             # Create PR
-            create_pr "$version" "$target_branch" "$dry_run"
+            create_pr "$version" "$target_branch" "$dry_run" "$updated_files" "$TEMP_DIR"
         else
             log "Dry run completed - no changes made"
         fi
     else
-        log "No changes needed or dry run completed"
+        if [ "$dry_run" = "true" ]; then
+            log "Dry run completed - no changes needed"
+        else
+            log "No changes needed"
+        fi
     fi
     
     log "Process completed successfully"
