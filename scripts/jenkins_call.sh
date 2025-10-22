@@ -182,12 +182,12 @@ jenkins_api_call() {
         if [ "$include_headers" = "true" ]; then
             curl -s -S -f -i --insecure --connect-timeout 15 --max-time 60 -X POST \
                 --user "$JENKINS_USER:$JENKINS_TOKEN" \
-                --data-urlencode "$data" \
+                --data "$data" \
                 "$url"
         else
             curl -s -S -f --insecure --connect-timeout 15 --max-time 60 -X POST \
                 --user "$JENKINS_USER:$JENKINS_TOKEN" \
-                --data-urlencode "$data" \
+                --data "$data" \
                 "$url"
         fi
     else
