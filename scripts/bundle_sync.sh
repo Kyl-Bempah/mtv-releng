@@ -37,7 +37,7 @@ usage() {
     echo "Arguments:"
     echo "  version       - Version to get snapshot for (e.g., '2-10', 'dev-preview')"
     echo "  target_branch - Target branch for PR (default: 'main')"
-    echo "  dry_run       - Set to 'true' to only show what would be changed (default: 'false')"
+    echo "  dry_run       - Set to 'true' to only show what would be changed (default: 'true')"
     echo ""
     echo "Environment Variables:"
     echo "  TARGET_REPO              - Target repository for PR creation (default: 'kubev2v/forklift')"
@@ -480,8 +480,18 @@ main() {
     
     # Update Containerfile-downstream files
     local updated_files
-    updated_files=$(update_containerfile_shas "$sha_mapping" "$dry_run" "$target_branch" "$TEMP_DIR")
-    local update_result=$?
+    local update_result
+    
+    # For both dry run and actual run, we need to capture the output but also display it
+    # Use a temporary file to capture the return value
+    local temp_result_file="/tmp/bundle_sync_result_$$"
+    update_containerfile_shas "$sha_mapping" "$dry_run" "$target_branch" "$TEMP_DIR" > "$temp_result_file" 2>&1
+    update_result=$?
+    # Display the output
+    cat "$temp_result_file"
+    # Extract the updated files from the output (if any)
+    updated_files=$(grep "Updated:" "$temp_result_file" | sed 's/.*Updated: //' || true)
+    rm -f "$temp_result_file"
     
     if [ $update_result -eq 0 ]; then
         if [ "$dry_run" = "false" ]; then
