@@ -182,11 +182,13 @@ jenkins_api_call() {
         if [ "$include_headers" = "true" ]; then
             curl -s -S -f -i --insecure --connect-timeout 15 --max-time 60 -X POST \
                 --user "$JENKINS_USER:$JENKINS_TOKEN" \
+                -H "Content-Type: application/x-www-form-urlencoded" \
                 --data "$data" \
                 "$url"
         else
             curl -s -S -f --insecure --connect-timeout 15 --max-time 60 -X POST \
                 --user "$JENKINS_USER:$JENKINS_TOKEN" \
+                -H "Content-Type: application/x-www-form-urlencoded" \
                 --data "$data" \
                 "$url"
         fi
@@ -260,41 +262,31 @@ trigger_jenkins_job() {
     
     log_info "Triggering job for OCP version: $openshift_version"
     
-    # Build JSON parameters
-    local json_params
-    json_params=$(jq -n \
-        --arg openshift_version "$openshift_version" \
-        --arg iib "$iib" \
-        --arg mtv_version "$mtv_version" \
-		--arg mtv_xy_version "$mtv_xy_version" \
-        --arg rc "$rc" \
-        '{
-            "parameter": [
-                {"name": "CLUSTER_NAME", "value": "qemtv-01"},
-                {"name": "OCP_VERSION", "value": $openshift_version},
-                {"name": "NFS_SERVER_IP", "value": "f02-h06-000-r640.rdu2.scalelab.redhat.com"},
-                {"name": "NFS_SHARE_PATH", "value": "/home/nfsshare"},
-                {"name": "DEPLOY_MTV", "value": "true"},
-                {"name": "IIB_NO", "value": $iib},
-                {"name": "MTV_SOURCE", "value": "KONFLUX"},
-                {"name": "MTV_VERSION", "value": $mtv_version},
-                {"name": "RC", "value": $rc},
-                {"name": "BRANCH", "value": "master"},
-                {"name": "REMOTE_CLUSTER_NAME", "value": "qemtv-01"},
-                {"name": "RUN_TESTS_IN_PARALLEL", "value": "true"},
-                {"name": "GIT_BRANCH", "value": "main"},
-                {"name": "MTV_API_TEST_GIT_USER", "value": "RedHatQE"},
-                {"name": "OPENSHIFT_PYTHON_WRAPPER_GIT_BRANCH", "value": "main"},
-                {"name": "PYTEST_EXTRA_PARAMS", "value": ("--tc=release_test:true --tc=target_ocp_version:" + $openshift_version)},
-                {"name": "OCP_XY_VERSION", "value": $openshift_version},
-				{"name": "MTV_XY_VERSION", "value": $mtv_xy_version},
-                {"name": "MATRIX_TYPE", "value": "RELEASE"}
-            ]
-        }')
+    # Build form-encoded parameters (Jenkins expects form data, not JSON)
+    local form_params
+    form_params="BRANCH=master"
+    form_params="${form_params}&CLUSTER_NAME=qemtv-01"
+    form_params="${form_params}&DEPLOY_MTV=true"
+    form_params="${form_params}&GIT_BRANCH=main"
+    form_params="${form_params}&IIB_NO=$(printf '%s' "$iib" | sed 's/&/%26/g')"
+    form_params="${form_params}&MATRIX_TYPE=RELEASE"
+    form_params="${form_params}&MTV_API_TEST_GIT_USER=RedHatQE"
+    form_params="${form_params}&MTV_SOURCE=KONFLUX"
+    form_params="${form_params}&MTV_VERSION=$(printf '%s' "$mtv_version" | sed 's/&/%26/g')"
+    form_params="${form_params}&MTV_XY_VERSION=$(printf '%s' "$mtv_xy_version" | sed 's/&/%26/g')"
+    form_params="${form_params}&NFS_SERVER_IP=f02-h06-000-r640.rdu2.scalelab.redhat.com"
+    form_params="${form_params}&NFS_SHARE_PATH=/home/nfsshare"
+    form_params="${form_params}&OCP_VERSION=$(printf '%s' "$openshift_version" | sed 's/&/%26/g')"
+    form_params="${form_params}&OCP_XY_VERSION=$(printf '%s' "$openshift_version" | sed 's/&/%26/g')"
+    form_params="${form_params}&OPENSHIFT_PYTHON_WRAPPER_GIT_BRANCH=main"
+    form_params="${form_params}&PYTEST_EXTRA_PARAMS=--tc=release_test:true --tc=target_ocp_version:$(printf '%s' "$openshift_version" | sed 's/&/%26/g')"
+    form_params="${form_params}&RC=$(printf '%s' "$rc" | sed 's/&/%26/g')"
+    form_params="${form_params}&REMOTE_CLUSTER_NAME=qemtv-01"
+    form_params="${form_params}&RUN_TESTS_IN_PARALLEL=true"
     
     # Trigger the job
     local response
-    if ! response=$(jenkins_api_call "$job_url" "json=${json_params}" "POST" "true"); then
+    if ! response=$(jenkins_api_call "$job_url" "$form_params" "POST" "true"); then
         log_error "Failed to trigger Jenkins job for OCP version: $openshift_version"
         return 1
     fi
