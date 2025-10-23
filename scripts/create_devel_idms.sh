@@ -6,18 +6,18 @@ version=$1
 
 # Print Usage if argument is missing
 if [[ -z $1 ]]; then
-    echo "Usage: ./create_devel_idms.sh <version>, examples:"
-    echo "./create_devel_idms.sh 2-9"
-    echo "./create_devel_idms.sh dev-preview"
-    exit 0
+  echo "Usage: ./create_devel_idms.sh <version>, examples:"
+  echo "./create_devel_idms.sh 2-9"
+  echo "./create_devel_idms.sh dev-preview"
+  exit 0
 fi
 
 repo="migration-toolkit-virtualization"
 if [[ $version == "dev-preview" ]]; then
-    repo="mtv-candidate"
+  repo="mtv-candidate"
 fi
 
-cat << EOF > devel-idms.yaml
+cat <<EOF >devel-idms.yaml
 apiVersion: config.openshift.io/v1
 kind: ImageDigestMirrorSet
 metadata:
@@ -73,6 +73,10 @@ spec:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/vsphere-xcopy-volume-populator-${version}
       source: registry.redhat.io/${repo}/mtv-vsphere-xcopy-volume-populator-rhel9
     - mirrors:
+        - registry.stage.redhat.io/${repo}/mtv-ova-proxy-rhel9
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-ova-proxy-${version}
+      source: registry.redhat.io/${repo}/mtv-ova-proxy-rhel9
+    - mirrors:
         - registry.stage.redhat.io/${repo}/mtv-rhel9-operator
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-operator-${version}
       source: registry.redhat.io/${repo}/mtv-rhel9-operator
@@ -122,6 +126,9 @@ spec:
     - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-operator-bundle-${version}
       source: registry.stage.redhat.io/${repo}/mtv-operator-bundle
+    - mirrors:
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-ova-proxy-${version}
+      source: registry.stage.redhat.io/${repo}/mtv-ova-proxy-rhel9
 
 EOF
 
