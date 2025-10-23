@@ -262,31 +262,30 @@ trigger_jenkins_job() {
     
     log_info "Triggering job for OCP version: $openshift_version"
     
-    # Build form-encoded parameters (Jenkins expects form data, not JSON)
-    local form_params
-    form_params="BRANCH=master"
-    form_params="${form_params}&CLUSTER_NAME=qemtv-01"
-    form_params="${form_params}&DEPLOY_MTV=true"
-    form_params="${form_params}&GIT_BRANCH=main"
-    form_params="${form_params}&IIB_NO=$(printf '%s' "$iib" | sed 's/&/%26/g')"
-    form_params="${form_params}&MATRIX_TYPE=RELEASE"
-    form_params="${form_params}&MTV_API_TEST_GIT_USER=RedHatQE"
-    form_params="${form_params}&MTV_SOURCE=KONFLUX"
-    form_params="${form_params}&MTV_VERSION=$(printf '%s' "$mtv_version" | sed 's/&/%26/g')"
-    form_params="${form_params}&MTV_XY_VERSION=$(printf '%s' "$mtv_xy_version" | sed 's/&/%26/g')"
-    form_params="${form_params}&NFS_SERVER_IP=f02-h06-000-r640.rdu2.scalelab.redhat.com"
-    form_params="${form_params}&NFS_SHARE_PATH=/home/nfsshare"
-    form_params="${form_params}&OCP_VERSION=$(printf '%s' "$openshift_version" | sed 's/&/%26/g')"
-    form_params="${form_params}&OCP_XY_VERSION=$(printf '%s' "$openshift_version" | sed 's/&/%26/g')"
-    form_params="${form_params}&OPENSHIFT_PYTHON_WRAPPER_GIT_BRANCH=main"
-    form_params="${form_params}&PYTEST_EXTRA_PARAMS=--tc=release_test:true --tc=target_ocp_version:$(printf '%s' "$openshift_version" | sed 's/&/%26/g')"
-    form_params="${form_params}&RC=$(printf '%s' "$rc" | sed 's/&/%26/g')"
-    form_params="${form_params}&REMOTE_CLUSTER_NAME=qemtv-01"
-    form_params="${form_params}&RUN_TESTS_IN_PARALLEL=true"
-    
-    # Trigger the job
+    # Trigger the job using direct curl with --data-urlencode (most readable approach)
     local response
-    if ! response=$(jenkins_api_call "$job_url" "$form_params" "POST" "true"); then
+    if ! response=$(curl -s -S -f -i --insecure --connect-timeout 15 --max-time 60 -X POST \
+        --user "$JENKINS_USER:$JENKINS_TOKEN" \
+        --data-urlencode "BRANCH=master" \
+        --data-urlencode "CLUSTER_NAME=qemtv-01" \
+        --data-urlencode "DEPLOY_MTV=true" \
+        --data-urlencode "GIT_BRANCH=main" \
+        --data-urlencode "IIB_NO=$iib" \
+        --data-urlencode "MATRIX_TYPE=RELEASE" \
+        --data-urlencode "MTV_API_TEST_GIT_USER=RedHatQE" \
+        --data-urlencode "MTV_SOURCE=KONFLUX" \
+        --data-urlencode "MTV_VERSION=$mtv_version" \
+        --data-urlencode "MTV_XY_VERSION=$mtv_xy_version" \
+        --data-urlencode "NFS_SERVER_IP=f02-h06-000-r640.rdu2.scalelab.redhat.com" \
+        --data-urlencode "NFS_SHARE_PATH=/home/nfsshare" \
+        --data-urlencode "OCP_VERSION=$openshift_version" \
+        --data-urlencode "OCP_XY_VERSION=$openshift_version" \
+        --data-urlencode "OPENSHIFT_PYTHON_WRAPPER_GIT_BRANCH=main" \
+        --data-urlencode "PYTEST_EXTRA_PARAMS=--tc=release_test:true --tc=target_ocp_version:$openshift_version" \
+        --data-urlencode "RC=$rc" \
+        --data-urlencode "REMOTE_CLUSTER_NAME=qemtv-01" \
+        --data-urlencode "RUN_TESTS_IN_PARALLEL=true" \
+        "$job_url"); then
         log_error "Failed to trigger Jenkins job for OCP version: $openshift_version"
         return 1
     fi
