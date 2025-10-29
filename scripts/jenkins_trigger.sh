@@ -11,45 +11,6 @@ source "$(dirname "$0")/util.sh"
 # Global variables
 declare -A JOB_TRACKING
 
-# Function to validate build ownership
-validate_build_ownership() {
-    local job_name="$1"
-    local build_number="$2"
-    local trigger_timestamp="$3"
-    
-    log_info "Validating build ownership for ${job_name}#${build_number} (trigger: ${trigger_timestamp})" >&2
-    
-    local build_url="${JENKINS_BASE_URL}/job/${job_name}/${build_number}/api/json"
-    local build_response
-    
-    if ! build_response=$(jenkins_api_call "$build_url" ""); then
-        log_warning "Failed to get build info for ${job_name}#${build_number}" >&2
-        return 1
-    fi
-    
-    local build_timestamp
-    build_timestamp=$(echo "$build_response" | jq -r '.timestamp // empty' 2>/dev/null)
-    
-    if [ -z "$build_timestamp" ] || [ "$build_timestamp" = "null" ]; then
-        log_warning "No timestamp found for build ${job_name}#${build_number}" >&2
-        return 1
-    fi
-    
-    # Convert timestamps to seconds for comparison
-    local trigger_seconds=$((trigger_timestamp / 1000))
-    local build_seconds=$((build_timestamp / 1000))
-    
-    # Allow a 5-minute window for build to start after trigger, with small negative tolerance for clock differences
-    local time_diff=$((build_seconds - trigger_seconds))
-    
-    if [ $time_diff -ge -30 ] && [ $time_diff -le 300 ]; then
-        return 0  # Build is within expected timeframe
-    else
-        log_warning "Build #${build_number} timestamp (${build_seconds}s) doesn't match expected trigger time (${trigger_seconds}s), diff: ${time_diff}s" >&2
-        return 1
-    fi
-}
-
 # Function to extract job number from Jenkins response
 extract_job_number() {
     local response="$1"
@@ -194,6 +155,31 @@ trigger_jenkins_job() {
         return 1
     fi
     
+    # If job is queued, wait for it to resolve to actual build number
+    if [[ "$job_number" =~ ^QUEUED_ ]]; then
+        local queue_item="${job_number#QUEUED_}"
+        log_info "Job queued with queue item ${queue_item}, waiting for build number..." >&2
+        
+        local resolved_build_number
+        if resolved_build_number=$(resolve_queue_item_to_build "$job_name" "$queue_item" "$trigger_timestamp"); then
+            job_number="$resolved_build_number"
+            log_success "Queue item resolved to build number: $job_number" >&2
+        else
+            log_warning "Failed to resolve queue item to build number, will use queue item ID: $job_number" >&2
+            # Continue with QUEUED_ prefix - watch script will handle resolution later
+        fi
+    elif [[ "$job_number" =~ ^PENDING_ ]]; then
+        # For PENDING jobs, try to get latest build and validate it
+        # Use unified function to resolve (polling mode)
+        local resolved_build_number
+        if resolved_build_number=$(resolve_pending_job_to_build "$job_name" "$trigger_timestamp"); then
+            job_number="$resolved_build_number"
+            log_success "Pending job resolved to build number: $job_number" >&2
+        else
+            log_warning "Failed to resolve PENDING job to build number, will use PENDING status" >&2
+        fi
+    fi
+    
     # Construct appropriate URL based on job number type
     local job_url_full
     if [[ "$job_number" =~ ^(PENDING_|QUEUED_) ]]; then
@@ -259,13 +245,8 @@ export_job_data() {
         local remaining="${parsed_info#*|}"
         local job_url="${remaining%%|*}"
         
-        # Extract OCP version
-        local ocp_version
-        if [[ "$remaining" =~ \|[0-9]+\.[0-9]+\| ]]; then
-            ocp_version=$(echo "$remaining" | cut -d'|' -f2)
-        else
-            ocp_version="${remaining##*|}"
-        fi
+        # Extract OCP version using shared function
+        local ocp_version=$(extract_ocp_version_from_parsed_info "$remaining")
         
         echo "    {" >> "$output_file"
         echo "      \"job_name\": \"$job_name\"," >> "$output_file"
@@ -282,41 +263,6 @@ export_job_data() {
     log_success "Job tracking data exported to: $output_file"
 }
 
-# Function to import job tracking data from previous stage
-import_job_data() {
-    local input_file="$1"
-    
-    if [ ! -f "$input_file" ]; then
-        log_error "Input file not found: $input_file"
-        return 1
-    fi
-    
-    # Clear existing tracking data
-    JOB_TRACKING=()
-    
-    # Parse JSON and populate JOB_TRACKING
-    local job_count=$(jq '.jobs | length' "$input_file" 2>/dev/null)
-    
-    if [ -z "$job_count" ] || [ "$job_count" = "null" ]; then
-        log_error "Invalid JSON format in: $input_file"
-        return 1
-    fi
-    
-    for ((i=0; i<job_count; i++)); do
-        local job_name=$(jq -r ".jobs[$i].job_name" "$input_file" 2>/dev/null)
-        local job_number=$(jq -r ".jobs[$i].job_number" "$input_file" 2>/dev/null)
-        local job_url=$(jq -r ".jobs[$i].job_url" "$input_file" 2>/dev/null)
-        local ocp_version=$(jq -r ".jobs[$i].ocp_version" "$input_file" 2>/dev/null)
-        
-        if [ "$job_name" != "null" ] && [ "$job_number" != "null" ] && [ "$job_url" != "null" ] && [ "$ocp_version" != "null" ]; then
-            JOB_TRACKING["$job_name"]="${job_number}|${job_url}|${ocp_version}"
-            log_info "Imported job: $job_name (build $job_number)"
-        fi
-    done
-    
-    log_success "Imported $job_count jobs from: $input_file"
-    return 0
-}
 
 # Standalone execution support
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
@@ -360,12 +306,10 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 fi
 
 # Export functions and variables for use by other modules
-export -f validate_build_ownership
 export -f validate_build_parameters
 export -f extract_job_number
 export -f trigger_jenkins_job
 export -f trigger_all_jobs
 export -f export_job_data
-export -f import_job_data
 export JOB_TRACKING
 export JENKINS_BASE_URL

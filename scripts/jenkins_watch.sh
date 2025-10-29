@@ -10,7 +10,7 @@ source "$(dirname "$0")/util.sh"
 
 # Constants
 readonly MAX_WAIT_TIME=10800  # 3 hours in seconds
-readonly POLL_INTERVAL=60    # 5 minutes in seconds
+readonly POLL_INTERVAL=300    # 5 minutes in seconds
 
 # Global variables
 declare -A JOB_TRACKING
@@ -45,19 +45,7 @@ check_job_status() {
                     if validate_build_ownership "$job_name" "$latest_build" "$stored_trigger_time"; then
                         log_info "Job started with build number: $latest_build" >&2
                         # Update the stored job number, preserving trigger timestamp
-                        local parsed_stored=$(parse_job_info "$stored_job_info")
-                        local remaining="${parsed_stored#*|}"
-                        local job_url_only="${remaining%%|*}"
-                        local ocp_version="${remaining##*|}"
-                        if [[ "$remaining" =~ \|[0-9]+$ ]]; then
-                            # Format: job_url|ocp_version|trigger_time
-                            ocp_version=$(echo "$remaining" | cut -d'|' -f1)
-                            local trigger_time=$(echo "$remaining" | cut -d'|' -f2)
-                            JOB_TRACKING["$job_name"]="${latest_build}|${JENKINS_BASE_URL}/job/${job_name}/${latest_build}/|${ocp_version}|${trigger_time}"
-                        else
-                            # Format: job_url|ocp_version
-                            JOB_TRACKING["$job_name"]="${latest_build}|${JENKINS_BASE_URL}/job/${job_name}/${latest_build}/|${ocp_version}"
-                        fi
+                        update_job_tracking_with_build "$job_name" "$latest_build"
                         job_number="$latest_build"
                         # Mark this queue item as processed
                         QUEUE_PROCESSED["$queue_cache_key"]="1"
@@ -93,102 +81,27 @@ check_job_status() {
             echo "$STATUS_QUEUED"
             return
         fi
-        local queue_item="${job_number#QUEUED_}"
-        local queue_url="${JENKINS_BASE_URL}/queue/item/${queue_item}/api/json"
         
-        local queue_response
-        if queue_response=$(jenkins_api_call "$queue_url" ""); then
-            # Queue item exists - check if job has started (has executable)
-            local executable_build
-            executable_build=$(echo "$queue_response" | jq -r '.executable.number // empty' 2>/dev/null)
-            
-            if [ -n "$executable_build" ] && [ "$executable_build" != "null" ]; then
-                # Job has started - validate and update job tracking
-                log_info "Job started with build number: $executable_build" >&2
-                
-                local job_info="${JOB_TRACKING[$job_name]}"
-                local parsed_info=$(parse_job_info "$job_info")
-                local stored_trigger_time="${parsed_info##*|}"
-                
-                if validate_build_ownership "$job_name" "$executable_build" "$stored_trigger_time"; then
-                    log_info "Job started with build number: $executable_build" >&2
-                    # Update the stored job number, preserving trigger timestamp
-                    local parsed_stored=$(parse_job_info "$job_info")
-                    local remaining="${parsed_stored#*|}"
-                    local job_url_only="${remaining%%|*}"
-                    local ocp_version="${remaining##*|}"
-                    if [[ "$remaining" =~ \|[0-9]+$ ]]; then
-                        # Format: job_url|ocp_version|trigger_time
-                        ocp_version=$(echo "$remaining" | cut -d'|' -f2)
-                        local trigger_time=$(echo "$remaining" | cut -d'|' -f3)
-                        JOB_TRACKING["$job_name"]="${executable_build}|${JENKINS_BASE_URL}/job/${job_name}/${executable_build}/|${ocp_version}|${trigger_time}"
-                    else
-                        # Format: job_url|ocp_version
-                        JOB_TRACKING["$job_name"]="${executable_build}|${JENKINS_BASE_URL}/job/${job_name}/${executable_build}/|${ocp_version}"
-                    fi
-                    job_number="$executable_build"
-                    # Mark this queue item as processed
-                    QUEUE_PROCESSED["$queue_cache_key"]="1"
-                    # Continue to check actual build status below
-                else
-                    log_warning "Build ownership validation failed for ${job_name}#${executable_build}, continuing to wait..." >&2
-                    echo "$STATUS_QUEUED"
-                    return
-                fi
-            else
-                # Job still waiting in queue
-                echo "$STATUS_QUEUED"
-                return
-            fi
-        else
-            # Queue item no longer exists (404) - job likely started, try to get latest build
-            # Mark this queue item as processed to avoid repeated 404 checks
+        # Get trigger timestamp from job tracking for validation
+        local job_info="${JOB_TRACKING[$job_name]}"
+        local parsed_info=$(parse_job_info "$job_info")
+        local stored_trigger_time="${parsed_info##*|}"
+        
+        # Use shared function to check if queue item has resolved (single check mode)
+        local executable_build
+        if executable_build=$(resolve_queue_item_to_build "$job_name" "$queue_item" "$stored_trigger_time" 300 0 2>/dev/null); then
+            # Job has started - update job tracking
+            log_info "Job started with build number: $executable_build" >&2
+            # Update the stored job number, preserving trigger timestamp
+            update_job_tracking_with_build "$job_name" "$executable_build"
+            job_number="$executable_build"
+            # Mark this queue item as processed
             QUEUE_PROCESSED["$queue_cache_key"]="1"
-            log_warning "Queue item no longer exists for job: $job_name, checking for started build" >&2
-            local job_info_url="${JENKINS_BASE_URL}/job/${job_name}/api/json"
-            local job_info_response
-            if job_info_response=$(jenkins_api_call "$job_info_url" ""); then
-                local latest_build
-                latest_build=$(echo "$job_info_response" | jq -r '.lastBuild.number // empty' 2>/dev/null)
-                if [ -n "$latest_build" ] && [ "$latest_build" != "null" ]; then
-                    # Validate and update job tracking
-                    local job_info="${JOB_TRACKING[$job_name]}"
-                    local parsed_info=$(parse_job_info "$job_info")
-                    local stored_trigger_time="${parsed_info##*|}"
-                    
-                    if validate_build_ownership "$job_name" "$latest_build" "$stored_trigger_time"; then
-                        log_info "Job started with build number: $latest_build" >&2
-                        # Update the stored job number, preserving trigger timestamp
-                        local parsed_stored=$(parse_job_info "$job_info")
-                        local remaining="${parsed_stored#*|}"
-                        local job_url_only="${remaining%%|*}"
-                        local ocp_version="${remaining##*|}"
-                        if [[ "$remaining" =~ \|[0-9]+$ ]]; then
-                            # Format: job_url|ocp_version|trigger_time
-                            ocp_version=$(echo "$remaining" | cut -d'|' -f1)
-                            local trigger_time=$(echo "$remaining" | cut -d'|' -f2)
-                            JOB_TRACKING["$job_name"]="${latest_build}|${JENKINS_BASE_URL}/job/${job_name}/${latest_build}/|${ocp_version}|${trigger_time}"
-                        else
-                            # Format: job_url|ocp_version
-                            JOB_TRACKING["$job_name"]="${latest_build}|${JENKINS_BASE_URL}/job/${job_name}/${latest_build}/|${ocp_version}"
-                        fi
-                        job_number="$latest_build"
-                        # Mark this queue item as processed
-                        QUEUE_PROCESSED["$queue_cache_key"]="1"
-                        # Continue to check actual build status below
-                    else
-                        log_warning "Build ownership validation failed for ${job_name}#${latest_build}, continuing to wait..." >&2
-                        echo "$STATUS_QUEUED"
-                        return
-                    fi
-                else
-                    echo "$STATUS_UNKNOWN"
-                    return
-                fi
-            else
-                echo "$STATUS_UNKNOWN"
-                return
-            fi
+            # Continue to check actual build status below
+        else
+            # Job still waiting in queue or validation failed
+            echo "$STATUS_QUEUED"
+            return
         fi
     fi
     
@@ -203,19 +116,7 @@ check_job_status() {
         if validate_build_ownership "$job_name" "$build_number" "$stored_trigger_time"; then
             log_info "Job started with build number: $build_number" >&2
             # Update the stored job number, preserving trigger timestamp
-            local parsed_stored=$(parse_job_info "$stored_job_info")
-            local remaining="${parsed_stored#*|}"
-            local job_url_only="${remaining%%|*}"
-            local ocp_version="${remaining##*|}"
-            if [[ "$remaining" =~ \|[0-9]+$ ]]; then
-                # Format: job_url|ocp_version|trigger_time
-                ocp_version=$(echo "$remaining" | cut -d'|' -f2)
-                local trigger_time="${remaining##*|}"
-                JOB_TRACKING["$job_name"]="${build_number}|${JENKINS_BASE_URL}/job/${job_name}/${build_number}/|${ocp_version}|${trigger_time}"
-            else
-                # Format: job_url|ocp_version
-                JOB_TRACKING["$job_name"]="${build_number}|${JENKINS_BASE_URL}/job/${job_name}/${build_number}/|${ocp_version}"
-            fi
+            update_job_tracking_with_build "$job_name" "$build_number"
             job_number="$build_number"
             # Continue to check actual build status below
         else
@@ -309,6 +210,8 @@ wait_for_jobs() {
 validate_job_results() {
     local success_jobs=0
     local failed_jobs=0
+    local running_jobs=0
+    local queued_jobs=0
     local unknown_jobs=0
     
     for job_name in "${!JOB_TRACKING[@]}"; do
@@ -342,14 +245,36 @@ validate_job_results() {
             "$STATUS_FAILURE"|"$STATUS_ABORTED")
                 failed_jobs=$((failed_jobs + 1))
                 ;;
+            "$STATUS_RUNNING")
+                running_jobs=$((running_jobs + 1))
+                ;;
+            "$STATUS_QUEUED")
+                queued_jobs=$((queued_jobs + 1))
+                ;;
             *)
                 unknown_jobs=$((unknown_jobs + 1))
                 ;;
         esac
     done
     
-    log_info "Job Results Summary: $success_jobs succeeded, $failed_jobs failed, $unknown_jobs unknown"
+    # Build summary message with all status counts
+    local summary_parts=()
+    [ $success_jobs -gt 0 ] && summary_parts+=("$success_jobs succeeded")
+    [ $failed_jobs -gt 0 ] && summary_parts+=("$failed_jobs failed")
+    [ $running_jobs -gt 0 ] && summary_parts+=("$running_jobs running")
+    [ $queued_jobs -gt 0 ] && summary_parts+=("$queued_jobs queued")
+    [ $unknown_jobs -gt 0 ] && summary_parts+=("$unknown_jobs unknown")
     
+    local summary_msg="Job Results Summary:"
+    if [ ${#summary_parts[@]} -gt 0 ]; then
+        local IFS=', '
+        summary_msg+=" ${summary_parts[*]}"
+    else
+        summary_msg+=" no jobs found"
+    fi
+    log_info "$summary_msg"
+    
+    # Return failure only for failed or unknown jobs (not for running/queued)
     if [ $failed_jobs -gt 0 ] || [ $unknown_jobs -gt 0 ]; then
         return 1
     fi
@@ -378,13 +303,8 @@ export_status_data() {
         local remaining="${parsed_info#*|}"
         local job_url="${remaining%%|*}"
         
-        # Extract OCP version
-        local ocp_version
-        if [[ "$remaining" =~ \|[0-9]+\.[0-9]+\| ]]; then
-            ocp_version=$(echo "$remaining" | cut -d'|' -f2)
-        else
-            ocp_version="${remaining##*|}"
-        fi
+        # Extract OCP version using shared function
+        local ocp_version=$(extract_ocp_version_from_parsed_info "$remaining")
         
         local final_status="${JOB_STATUS_CACHE[$job_name]}"
         
@@ -404,41 +324,6 @@ export_status_data() {
     log_success "Job status data exported to: $output_file"
 }
 
-# Function to import job tracking data from previous stage
-import_job_data() {
-    local input_file="$1"
-    
-    if [ ! -f "$input_file" ]; then
-        log_error "Input file not found: $input_file"
-        return 1
-    fi
-    
-    # Clear existing tracking data
-    JOB_TRACKING=()
-    
-    # Parse JSON and populate JOB_TRACKING
-    local job_count=$(jq '.jobs | length' "$input_file" 2>/dev/null)
-    
-    if [ -z "$job_count" ] || [ "$job_count" = "null" ]; then
-        log_error "Invalid JSON format in: $input_file"
-        return 1
-    fi
-    
-    for ((i=0; i<job_count; i++)); do
-        local job_name=$(jq -r ".jobs[$i].job_name" "$input_file" 2>/dev/null)
-        local job_number=$(jq -r ".jobs[$i].job_number" "$input_file" 2>/dev/null)
-        local job_url=$(jq -r ".jobs[$i].job_url" "$input_file" 2>/dev/null)
-        local ocp_version=$(jq -r ".jobs[$i].ocp_version" "$input_file" 2>/dev/null)
-        
-        if [ "$job_name" != "null" ] && [ "$job_number" != "null" ] && [ "$job_url" != "null" ] && [ "$ocp_version" != "null" ]; then
-            JOB_TRACKING["$job_name"]="${job_number}|${job_url}|${ocp_version}"
-            log_info "Imported job: $job_name (build $job_number)"
-        fi
-    done
-    
-    log_success "Imported $job_count jobs from: $input_file"
-    return 0
-}
 
 # Standalone execution support
 if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
@@ -498,7 +383,6 @@ export -f check_job_status
 export -f wait_for_jobs
 export -f validate_job_results
 export -f export_status_data
-export -f import_job_data
 export JOB_TRACKING
 export JOB_STATUS_CACHE
 export JENKINS_BASE_URL
