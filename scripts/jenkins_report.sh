@@ -24,15 +24,8 @@ display_results() {
         local remaining="${parsed_info#*|}"
         local job_url_only="${remaining%%|*}"
         
-        # Extract OCP version correctly
-        local ocp_version
-        if [[ "$remaining" =~ \|[0-9]+\.[0-9]+\| ]]; then
-            # Format: job_url|ocp_version|trigger_time - extract middle part
-            ocp_version=$(echo "$remaining" | cut -d'|' -f2)
-        else
-            # Format: job_url|ocp_version
-            ocp_version="${remaining##*|}"
-        fi
+        # Extract OCP version using shared function
+        local ocp_version=$(extract_ocp_version_from_parsed_info "$remaining")
         
         # Use cached status from validate_job_results to avoid extra API calls
         local final_status="${JOB_STATUS_CACHE[$job_name]}"
@@ -41,7 +34,9 @@ display_results() {
         case "$final_status" in
             "$STATUS_SUCCESS") status_color="$GREEN" ;;
             "$STATUS_FAILURE"|"$STATUS_ABORTED") status_color="$RED" ;;
-            *) status_color="$YELLOW" ;;
+            "$STATUS_RUNNING") status_color="$BLUE" ;;
+            "$STATUS_QUEUED") status_color="$YELLOW" ;;
+            *) status_color="$YELLOW" ;;  # Unknown status
         esac
         
         echo -e "${status_color}${ocp_version}: ${final_status} - [URL](${job_url_only})${NC}"
@@ -70,15 +65,8 @@ generate_json_output() {
         local remaining="${parsed_info#*|}"
         local job_url_only="${remaining%%|*}"
         
-        # Extract OCP version correctly
-        local ocp_version
-        if [[ "$remaining" =~ \|[0-9]+\.[0-9]+\| ]]; then
-            # Format: job_url|ocp_version|trigger_time - extract middle part
-            ocp_version=$(echo "$remaining" | cut -d'|' -f2)
-        else
-            # Format: job_url|ocp_version
-            ocp_version="${remaining##*|}"
-        fi
+        # Extract OCP version using shared function
+        local ocp_version=$(extract_ocp_version_from_parsed_info "$remaining")
         
         # Use cached status from validate_job_results to avoid extra API calls
         local final_status="${JOB_STATUS_CACHE[$job_name]}"
@@ -113,13 +101,8 @@ display_failed_jobs() {
             local remaining="${parsed_info#*|}"
             local job_url_only="${remaining%%|*}"
             
-            # Extract OCP version correctly
-            local ocp_version
-            if [[ "$remaining" =~ \|[0-9]+\.[0-9]+\| ]]; then
-                ocp_version=$(echo "$remaining" | cut -d'|' -f2)
-            else
-                ocp_version="${remaining##*|}"
-            fi
+            # Extract OCP version using shared function
+            local ocp_version=$(extract_ocp_version_from_parsed_info "$remaining")
             
             failed_jobs+=("OCP ${ocp_version}: ${final_status} - ${job_url_only}")
         fi
