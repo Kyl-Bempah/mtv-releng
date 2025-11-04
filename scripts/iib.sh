@@ -6,18 +6,18 @@ version=$2
 operator_pkg="mtv-operator"
 PROT="docker://"
 
-# Print Usage if IIB URL is missing 
+# Print Usage if IIB URL is missing
 if [[ -z $1 || -z $2 ]]; then
-    echo "Usage: ./iib.sh <url to iib> <version>, examples:"
-    echo "./iib.sh quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-fbc-prod-v418:on-pr-76657e65fa4e6ff445965976200aed1ad7adbb7d 2.9.0"
-    echo "./iib.sh registry-proxy.engineering.redhat.com/rh-osbs/iib:985689 2.8.5"
-    echo "./iib.sh registry.redhat.io/redhat/redhat-operator-index:v4.18 2.8.5"
-    exit 0
+  echo "Usage: ./iib.sh <url to iib> <version>, examples:"
+  echo "./iib.sh quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-fbc-prod-v418:on-pr-76657e65fa4e6ff445965976200aed1ad7adbb7d 2.9.0"
+  echo "./iib.sh registry-proxy.engineering.redhat.com/rh-osbs/iib:985689 2.8.5"
+  echo "./iib.sh registry.redhat.io/redhat/redhat-operator-index:v4.18 2.8.5"
+  exit 0
 fi
 
 # Prepend protocol to the URL
 if [[ ${iib_url:0:${#PROT}} != $PROT ]]; then
-    iib_url="${PROT}${iib_url}"
+  iib_url="${PROT}${iib_url}"
 fi
 
 # Get image manifests
@@ -42,13 +42,13 @@ tar -xf "${tmp_dir}/${layer_sha}" -C $tmp_dir
 bundle_img=$(cat $tmp_dir/configs/$operator_pkg/catalog.json | jq -r ". | select(.name == \"${operator_pkg}.v${version}\") | .image")
 
 if [[ -z $bundle_img ]]; then
-    log "Could not find bundle image in specified IIB for specified version."
+  log "Could not find bundle image in specified IIB for specified version."
 else
-    # clear output file
-    cl_output
-    log "### RESULT ###"
-    # Don't know if it's still necessary to remove the trailing char
-    w_output $(ytj "BUNDLE_IMAGE: ${bundle_img:1:-1}")
+  # clear output file
+  cl_output
+  log "### RESULT ###"
+  # Don't know if it's still necessary to remove the trailing char
+  w_output $(ytj "BUNDLE_IMAGE: $bundle_img")
 fi
 
 # Remove created temporary directory
