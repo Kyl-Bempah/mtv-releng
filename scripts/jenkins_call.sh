@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Jenkins job orchestrator script
 # Coordinates triggering, watching, and reporting modules

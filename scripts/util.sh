@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # singleton env var to prevent reexporting during multiple "source scripts/util.sh" calls
 if [[ -z "${CMD_OUTPUT_PATH:-}" ]]; then

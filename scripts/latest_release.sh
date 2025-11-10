@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Gets the latest successful release for specified version of forklift, e.g. forklift-operator-2-9...
 

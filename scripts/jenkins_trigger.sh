@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Jenkins job triggering module
 # Handles job triggering, validation, and initial setup

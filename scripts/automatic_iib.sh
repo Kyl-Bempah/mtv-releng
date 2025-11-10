@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 source scripts/util.sh
 
 # This script does all the neccessary tasks to create a new IIBs from latest released stage bundles
