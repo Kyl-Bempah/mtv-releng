@@ -60,6 +60,8 @@ def replace_for_quay(img: str, version: str) -> str:
         if not component:
             return img
         return f"{registry}{repo}{component}-{version}@{parts[2].split("@")[1]}"
+    elif "quay.io" in img:
+        return img
 
 def map_component(cmp: str)-> str:
     cmps = {

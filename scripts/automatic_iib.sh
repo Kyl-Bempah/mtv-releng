@@ -11,6 +11,13 @@ filter_version=$1
 # authenticate to required services
 source scripts/auth.sh
 
+### Change this once we modify the clusters (if you want to disable a OCP version then use ["4.17"]="none")
+declare -A ocp_to_cluster_mappings=(
+  ["4.20"]="qemtv-01"
+  ["4.19"]="none"
+  ["4.18"]="none"
+)
+
 # Get shas of the bundles in registry
 scripts/latest_stage_bundles.sh $filter_version
 latest_shas=$(r_output)
@@ -21,7 +28,7 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
 
   # create PR with the bundle
   scripts/create_iib_pr.sh main $version $sha
-  if (( $? != 0 )); then
+  if (($? != 0)); then
     log "Error occured, exiting..."
     exit 1
   fi
@@ -56,6 +63,7 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
     scripts/extract_info.sh $current_iib $version
   else
     scripts/extract_diff.sh $current_iib $version $prev_iib $prev_version
+    echo "Get diff"
   fi
   iib_info=$(r_output)
 
@@ -81,6 +89,20 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
     export changes=$(echo $iib_info | jq ".diffs")
   fi
   scripts/iib_notify.sh
+  for ocp in $(echo $ocp_urls | jq -r '. | keys.[]'); do
+    ocp_ver=${ocp#*v}
+    ocp_url=$(echo "$ocp_urls" | jq -r ".\"$ocp\"")
+    iib_short=${ocp_url##*/}
+    cluster=${ocp_to_cluster_mappings[$ocp_ver]}
+    if [[ $cluster == "" || $cluster == "none" ]]; then
+      echo "skipping jenkins_call" "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
+      continue
+    else
+      echo "jenkins_call" "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
+      scripts/jenkins_call.sh "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
+    fi
+  done
+
 done
 
 log "Done"
