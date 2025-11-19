@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 source scripts/util.sh
 
 # Get commit history from the specified IIB

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 version="2-8-7"
 snapshot="forklift-operator-2-8-mpc7s"

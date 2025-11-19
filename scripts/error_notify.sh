@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 source scripts/util.sh
 
 # Send error notification to our slack errors channel

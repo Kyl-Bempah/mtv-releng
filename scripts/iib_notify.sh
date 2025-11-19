@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 source scripts/util.sh
 
 # Send notification about new IIB to our slack channel

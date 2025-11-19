@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Jenkins job reporting module
 # Handles result display, JSON output, and final reporting

@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 source scripts/util.sh
 
 # Waits until all konflux builds running for PR finish

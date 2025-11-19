@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Jenkins job monitoring module
 # Handles job status checking, waiting, and monitoring

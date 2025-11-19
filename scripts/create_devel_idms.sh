@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Applies IDMS for testing the MTV in a cluster before release
 
