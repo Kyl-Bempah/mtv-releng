@@ -49,9 +49,9 @@ spec:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/validation-${version}
       source: registry.redhat.io/${repo}/mtv-validation-rhel9
     - mirrors:
-        - registry.stage.redhat.io/${repo}/mtv-virt-v2v-rhel9
-        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/virt-v2v-${version}
-      source: registry.redhat.io/${repo}/mtv-virt-v2v-rhel9
+        - registry.stage.redhat.io/${repo}/mtv-virt-v2v-rhel10
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/virt-v2v-int-${version}
+      source: registry.redhat.io/${repo}/mtv-virt-v2v-rhel10
     - mirrors:
         - registry.stage.redhat.io/${repo}/mtv-populator-controller-rhel9
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/populator-controller-${version}
@@ -103,8 +103,8 @@ spec:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/validation-${version}
       source: registry.stage.redhat.io/${repo}/mtv-validation-rhel9
     - mirrors:
-        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/virt-v2v-${version}
-      source: registry.stage.redhat.io/${repo}/mtv-virt-v2v-rhel9
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/virt-v2v-int-${version}
+      source: registry.stage.redhat.io/${repo}/mtv-virt-v2v-rhel10
     - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/populator-controller-${version}
       source: registry.stage.redhat.io/${repo}/mtv-populator-controller-rhel9
