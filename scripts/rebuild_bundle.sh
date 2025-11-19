@@ -5,8 +5,8 @@ version=$1
 # Print Usage if argument is missing
 if [[ -z $1 ]]; then
     echo "Usage: "
-    echo "./rebuild_all.sh 2-9"
-    echo "./rebuild_all.sh dev-preview"
+    echo "./rebuild_bundle.sh 2-9"
+    echo "./rebuild_bundle.sh dev-preview"
     exit 0
 fi
 

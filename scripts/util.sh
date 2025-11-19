@@ -514,7 +514,7 @@ function rm_temp_dir {
 function validate_tools {
     local missing_tools=()
     
-    for tool in oc jq yq gh git; do
+    for tool in oc jq yq gh git skopeo; do
         if ! command -v "$tool" &> /dev/null; then
             missing_tools+=("$tool")
         fi
