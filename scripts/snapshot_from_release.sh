@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Gets the snapshot from specified release, e.g. forklift-operator-dev-preview-czdbc-540628f-hn27f
 

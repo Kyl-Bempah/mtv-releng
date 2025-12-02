@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 
 # Gets the latest successful snapshot for specified version of forklift, e.g. forklift-operator-2-9...
 
@@ -14,4 +14,4 @@ if [[ -z $1 ]]; then
 fi
 
 
-oc get snapshots --sort-by='{.metadata.creationTimestamp}' -o custom-columns=NAME:.metadata.name | grep $version | tac | head -n 1
+oc get snapshots --sort-by='{.metadata.creationTimestamp}' -o custom-columns=NAME:.metadata.name | grep $version | tail -n 1

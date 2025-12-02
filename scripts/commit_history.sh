@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 source scripts/util.sh
 
 # Gets commit history for specified component (backend, frontend or gather), for specified branch (main, release-2.9...) and from the most recent commit to oldest commit (excluding the oldest commit in output)
