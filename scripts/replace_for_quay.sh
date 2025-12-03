@@ -1,4 +1,4 @@
-#!/bin/bash
+#!/usr/bin/env bash
 source scripts/util.sh
 
 # Replaces prod and stage image urls with quay urls
@@ -36,6 +36,9 @@ repo=${repo%%/*}
 cmp=${img_sha%%@*}
 sha=${img_sha##*\:}
 
+# save original component name before mapping
+orig_cmp=$cmp
+
 # pair the prod cmp name with quay cmp name
 cmp=$(echo $cmps | jq ".\"$cmp\"" -r)
 
@@ -48,5 +51,17 @@ else
   cmp_ver=${cmp_ver/./-}
 fi
 
-registry="quay.io/redhat-user-workloads/rh-mtv-1-tenant"
-echo $registry"/"forklift-operator-$cmp_ver"/"$cmp"-"$cmp_ver"@sha256:"$sha
+# Use different registry and format for virt-v2v rhel10 component
+if [[ "$orig_cmp" == "mtv-virt-v2v-rhel10" ]]; then
+  registry="quay.io/repository/redhat-user-workloads/rh-mtv-btrfs-tenant"
+  # Calculate version format for rhel10 virt-v2v (int-prefixed)
+  if [[ $repo == "mtv-candidate" ]]; then
+    int_ver="int-dev-preview"
+  else
+    int_ver="int-"$cmp_ver
+  fi
+  echo $registry"/forklift-operator-"$int_ver"/virt-v2v-"$int_ver"@sha256:"$sha
+else
+  registry="quay.io/redhat-user-workloads/rh-mtv-1-tenant"
+  echo $registry"/"forklift-operator-$cmp_ver"/"$cmp"-"$cmp_ver"@sha256:"$sha
+fi
