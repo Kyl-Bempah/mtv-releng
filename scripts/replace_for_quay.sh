@@ -53,7 +53,7 @@ fi
 
 # Use different registry and format for virt-v2v rhel10 component
 if [[ "$orig_cmp" == "mtv-virt-v2v-rhel10" ]]; then
-  registry="quay.io/repository/redhat-user-workloads/rh-mtv-btrfs-tenant"
+  registry="quay.io/redhat-user-workloads/rh-mtv-btrfs-tenant"
   # Calculate version format for rhel10 virt-v2v (int-prefixed)
   if [[ $repo == "mtv-candidate" ]]; then
     int_ver="int-dev-preview"
