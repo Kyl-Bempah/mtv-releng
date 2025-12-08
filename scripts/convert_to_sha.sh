@@ -1,4 +1,4 @@
-#/bin/bash
+#!/usr/bin/env bash
 
 component_url=$1
 PROT="docker://"

@@ -1,4 +1,4 @@
-#/bin/bash
+#!/usr/bin/env bash
 source scripts/util.sh
 
 bundle_url=$1
