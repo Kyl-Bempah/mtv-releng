@@ -11,6 +11,90 @@ source "$(dirname "$0")/util.sh"
 # Global variables
 declare -A JOB_TRACKING
 
+# Function to get cluster name for a specific job suffix
+# Supports both single value (applies to all) and mapping format (suffix:cluster,suffix:cluster)
+get_cluster_for_suffix() {
+  local cluster_param="$1"
+  local job_suffix="$2"
+  local default_cluster="${3:-qemtv-01}"
+  
+  # If cluster_param is empty, use default
+  if [ -z "$cluster_param" ]; then
+    echo "$default_cluster"
+    return 0
+  fi
+  
+  # Check if it's a mapping format (contains colon)
+  if [[ "$cluster_param" =~ : ]]; then
+    # Parse mapping format: "gate:qemtv-01,non-gate:qemtv-02"
+    IFS=',' read -ra CLUSTER_MAPPINGS <<<"$cluster_param"
+    for mapping in "${CLUSTER_MAPPINGS[@]}"; do
+      # Trim whitespace
+      mapping=$(echo "$mapping" | xargs)
+      local suffix_part="${mapping%%:*}"
+      local cluster_part="${mapping#*:}"
+      # Trim whitespace from parts
+      suffix_part=$(echo "$suffix_part" | xargs)
+      cluster_part=$(echo "$cluster_part" | xargs)
+      
+      if [ "$suffix_part" = "$job_suffix" ]; then
+        echo "$cluster_part"
+        return 0
+      fi
+    done
+    # No mapping found for this suffix, use default
+    log_warning "No cluster mapping found for suffix '$job_suffix', using default: $default_cluster"
+    echo "$default_cluster"
+    return 0
+  else
+    # Single value format - applies to all suffixes
+    echo "$cluster_param"
+    return 0
+  fi
+}
+
+# Function to get matrix type for a specific job suffix
+# Supports both single value (applies to all) and mapping format (suffix:type,suffix:type)
+get_matrix_type_for_suffix() {
+  local matrix_type_param="$1"
+  local job_suffix="$2"
+  local default_matrix_type="${3:-RELEASE}"
+  
+  # If matrix_type_param is empty, use default
+  if [ -z "$matrix_type_param" ]; then
+    echo "$default_matrix_type"
+    return 0
+  fi
+  
+  # Check if it's a mapping format (contains colon)
+  if [[ "$matrix_type_param" =~ : ]]; then
+    # Parse mapping format: "gate:RELEASE,non-gate:FULL"
+    IFS=',' read -ra MATRIX_MAPPINGS <<<"$matrix_type_param"
+    for mapping in "${MATRIX_MAPPINGS[@]}"; do
+      # Trim whitespace
+      mapping=$(echo "$mapping" | xargs)
+      local suffix_part="${mapping%%:*}"
+      local type_part="${mapping#*:}"
+      # Trim whitespace from parts
+      suffix_part=$(echo "$suffix_part" | xargs)
+      type_part=$(echo "$type_part" | xargs)
+      
+      if [ "$suffix_part" = "$job_suffix" ]; then
+        echo "$type_part"
+        return 0
+      fi
+    done
+    # No mapping found for this suffix, use default
+    log_warning "No matrix type mapping found for suffix '$job_suffix', using default: $default_matrix_type"
+    echo "$default_matrix_type"
+    return 0
+  else
+    # Single value format - applies to all suffixes
+    echo "$matrix_type_param"
+    return 0
+  fi
+}
+
 # Function to extract job number from Jenkins response
 extract_job_number() {
   local response="$1"
@@ -97,15 +181,17 @@ trigger_jenkins_job() {
   local mtv_version="$3"
   local rc="$4"
   local cluster_name="${5:-qemtv-01}" # Default to qemtv-01 if not provided
+  local job_suffix="${6:-gate}" # Default to "gate" for backward compatibility
+  local matrix_type="${7:-RELEASE}" # Default to "RELEASE" for backward compatibility
 
   # Variable creation for XY version (drop trailing .z)
   local mtv_xy_version
   mtv_xy_version=$(echo "$mtv_version" | awk -F. '{print $1"."$2}')
 
-  local job_name="mtv-${mtv_xy_version}-ocp-${openshift_version}-test-release-gate"
+  local job_name="mtv-${mtv_xy_version}-ocp-${openshift_version}-test-release-${job_suffix}"
   local job_url="${JENKINS_BASE_URL}/job/${job_name}"
 
-  log_info "Triggering job for OCP version: $openshift_version (cluster: $cluster_name)"
+  log_info "Triggering job for OCP version: $openshift_version (cluster: $cluster_name, job_suffix: $job_suffix, matrix_type: $matrix_type)"
 
   # Record trigger timestamp BEFORE triggering the job
   local trigger_timestamp=$(date +%s)000 # Convert to milliseconds
@@ -119,7 +205,7 @@ trigger_jenkins_job() {
     --data-urlencode "DEPLOY_MTV=true" \
     --data-urlencode "GIT_BRANCH=main" \
     --data-urlencode "IIB_NO=${iib}" \
-    --data-urlencode "MATRIX_TYPE=RELEASE" \
+    --data-urlencode "MATRIX_TYPE=${matrix_type}" \
     --data-urlencode "MTV_API_TEST_GIT_USER=RedHatQE" \
     --data-urlencode "MTV_SOURCE=KONFLUX" \
     --data-urlencode "MTV_VERSION=${mtv_version}" \
@@ -204,19 +290,37 @@ trigger_all_jobs() {
   local ocp_versions="$3"
   local rc="$4"
   local cluster_name="${5:-qemtv-01}" # Default to qemtv-01 if not provided
+  local job_suffix="${6:-gate}" # Default to "gate" for backward compatibility (can be comma-separated)
+  local matrix_type="${7:-RELEASE}" # Default to "RELEASE" for backward compatibility
 
   # Convert comma-separated OCP versions to array
   IFS=',' read -ra OCP_VERSIONS_ARRAY <<<"$ocp_versions"
+  
+  # Convert comma-separated job suffixes to array
+  IFS=',' read -ra JOB_SUFFIX_ARRAY <<<"$job_suffix"
 
-  # Trigger jobs for each OCP version
+  # Trigger jobs for each combination of OCP version and job suffix
   for openshift_version in "${OCP_VERSIONS_ARRAY[@]}"; do
     # Trim whitespace
     openshift_version=$(echo "$openshift_version" | xargs)
+    
+    for suffix in "${JOB_SUFFIX_ARRAY[@]}"; do
+      # Trim whitespace
+      suffix=$(echo "$suffix" | xargs)
+      
+      # Get cluster name for this specific suffix
+      local suffix_cluster
+      suffix_cluster=$(get_cluster_for_suffix "$cluster_name" "$suffix" "qemtv-01")
+      
+      # Get matrix type for this specific suffix
+      local suffix_matrix_type
+      suffix_matrix_type=$(get_matrix_type_for_suffix "$matrix_type" "$suffix" "RELEASE")
 
-    if ! trigger_jenkins_job "$openshift_version" "$iib" "$mtv_version" "$rc" "$cluster_name"; then
-      log_error "Failed to trigger job for OCP version: $openshift_version"
-      return 1
-    fi
+      if ! trigger_jenkins_job "$openshift_version" "$iib" "$mtv_version" "$rc" "$suffix_cluster" "$suffix" "$suffix_matrix_type"; then
+        log_error "Failed to trigger job for OCP version: $openshift_version, job suffix: $suffix, cluster: $suffix_cluster"
+        return 1
+      fi
+    done
   done
 
   log_success "All jobs triggered successfully. Waiting for completion..."
@@ -269,11 +373,11 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 
   case "${1:-}" in
   "trigger")
-    if [ $# -lt 5 ] || [ $# -gt 6 ]; then
-      echo "Usage: $0 trigger <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> [CLUSTER_NAME]"
+    if [ $# -lt 5 ] || [ $# -gt 8 ]; then
+      echo "Usage: $0 trigger <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> [CLUSTER_NAME] [JOB_SUFFIX] [MATRIX_TYPE]"
       exit 1
     fi
-    trigger_all_jobs "$2" "$3" "$4" "$5" "${6:-qemtv-01}"
+    trigger_all_jobs "$2" "$3" "$4" "$5" "${6:-qemtv-01}" "${7:-gate}" "${8:-RELEASE}"
     export_job_data "job_tracking.json"
     ;;
   "import")
@@ -290,13 +394,27 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     echo "Usage: $0 {trigger|import|export} [args...]"
     echo
     echo "Commands:"
-    echo "  trigger <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> [CLUSTER_NAME]  - Trigger jobs and export data"
+    echo "  trigger <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> [CLUSTER_NAME] [JOB_SUFFIX] [MATRIX_TYPE]  - Trigger jobs and export data"
     echo "  import <job_data_file>                                         - Import job data from file"
     echo "  export [output_file]                                           - Export current job data"
+    echo
+    echo "Arguments:"
+    echo "  CLUSTER_NAME: Jenkins cluster name (default: 'qemtv-01')"
+    echo "               - Single value: applies to all job suffixes (e.g., 'qemtv-01', 'qemtv-02')"
+    echo "               - Mapping format: different clusters per suffix (e.g., 'gate:qemtv-01,non-gate:qemtv-02')"
+    echo "  JOB_SUFFIX: Job name suffix (default: 'gate', can be comma-separated, e.g., 'gate', 'non-gate', 'gate,non-gate')"
+    echo "  MATRIX_TYPE: Matrix type (default: 'RELEASE')"
+    echo "               - Single value: applies to all job suffixes (e.g., 'RELEASE', 'FULL', 'STAGE', 'TIER1')"
+    echo "               - Mapping format: different matrix types per suffix (e.g., 'gate:RELEASE,non-gate:FULL')"
     echo
     echo "Examples:"
     echo "  $0 trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false'"
     echo "  $0 trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-02'"
+    echo "  $0 trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'non-gate' 'FULL'"
+    echo "  $0 trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'gate,non-gate' 'RELEASE'"
+    echo "  $0 trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'gate,non-gate' 'gate:RELEASE,non-gate:FULL'"
+    echo "  $0 trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'gate:qemtv-01,non-gate:qemtv-02' 'gate,non-gate' 'RELEASE'"
+    echo "  $0 trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'gate:qemtv-01,non-gate:qemtv-02' 'gate,non-gate' 'gate:RELEASE,non-gate:FULL'"
     echo "  $0 import job_tracking.json"
     echo "  $0 export my_jobs.json"
     exit 1

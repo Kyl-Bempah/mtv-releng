@@ -21,7 +21,7 @@ The scripts use JSON files to pass data between stages:
 
 ```bash
 # Trigger jobs and export data
-./scripts/jenkins_trigger.sh trigger <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> [CLUSTER_NAME]
+./scripts/jenkins_trigger.sh trigger <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> [CLUSTER_NAME] [JOB_SUFFIX] [MATRIX_TYPE]
 
 # Import job data from file
 ./scripts/jenkins_trigger.sh import <job_data_file>
@@ -30,13 +30,28 @@ The scripts use JSON files to pass data between stages:
 ./scripts/jenkins_trigger.sh export [output_file]
 ```
 
+**Arguments:**
+- `JOB_SUFFIX`: Job name suffix (default: `gate`, can be comma-separated, e.g., `gate`, `non-gate`, `gate,non-gate`)
+- `MATRIX_TYPE`: Matrix type (default: `RELEASE`)
+  - Single value: applies to all job suffixes (e.g., `RELEASE`, `FULL`, `STAGE`, `TIER1`)
+  - Mapping format: different matrix types per suffix (e.g., `gate:RELEASE,non-gate:FULL`)
+
 **Examples:**
 ```bash
-# Trigger jobs for OCP 4.20 (default cluster: qemtv-01)
+# Trigger jobs for OCP 4.20 (default cluster: qemtv-01, default suffix: gate, default matrix: RELEASE)
 ./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false'
 
 # Trigger jobs for OCP 4.20 on specific cluster
 ./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-02'
+
+# Trigger non-gate jobs with FULL matrix type
+./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'non-gate' 'FULL'
+
+# Trigger both gate and non-gate jobs with same matrix type
+./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'gate,non-gate' 'RELEASE'
+
+# Trigger both gate and non-gate jobs with different matrix types
+./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'gate,non-gate' 'gate:RELEASE,non-gate:FULL'
 
 # Import jobs from previous run
 ./scripts/jenkins_trigger.sh import job_tracking.json
@@ -110,20 +125,34 @@ The scripts use JSON files to pass data between stages:
 
 ### 1. Full Pipeline (Traditional)
 ```bash
-# Default cluster (qemtv-01)
+# Default cluster (qemtv-01), default suffix (gate), default matrix (RELEASE)
 ./scripts/jenkins_call.sh 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false'
 
 # Specific cluster
 ./scripts/jenkins_call.sh 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-02'
+
+# Both gate and non-gate jobs with different matrix types
+./scripts/jenkins_call.sh 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'gate,non-gate' 'gate:RELEASE,non-gate:FULL'
+
+# Different clusters and matrix types for different job types
+./scripts/jenkins_call.sh 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'gate:qemtv-01,non-gate:qemtv-02' 'gate,non-gate' 'gate:RELEASE,non-gate:FULL'
 ```
 
 ### 2. Trigger Only
 ```bash
-# Default cluster (qemtv-01)
+# Default cluster (qemtv-01), default suffix (gate), default matrix (RELEASE)
 ./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false'
 
 # Specific cluster
 ./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-02'
+# Creates: job_tracking.json
+
+# Non-gate jobs with FULL matrix type
+./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'non-gate' 'FULL'
+# Creates: job_tracking.json
+
+# Different clusters for different job types
+./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'gate:qemtv-01,non-gate:qemtv-02' 'gate,non-gate' 'RELEASE'
 # Creates: job_tracking.json
 ```
 
@@ -140,8 +169,8 @@ The scripts use JSON files to pass data between stages:
 
 ### 5. Debugging Workflow
 ```bash
-# Step 1: Trigger jobs
-./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false'
+# Step 1: Trigger jobs (with optional job suffix and matrix type)
+./scripts/jenkins_trigger.sh trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'gate,non-gate' 'gate:RELEASE,non-gate:FULL'
 
 # Step 2: Check what was triggered
 cat job_tracking.json
@@ -183,6 +212,12 @@ cat job_status.json
       "job_number": "65",
       "job_url": "https://jenkins-csb-mtv-qe-main.dno.corp.redhat.com/job/mtv-2.10-ocp-4.20-test-release-gate/65/",
       "ocp_version": "4.20"
+    },
+    {
+      "job_name": "mtv-2.10-ocp-4.20-test-release-non-gate",
+      "job_number": "42",
+      "job_url": "https://jenkins-csb-mtv-qe-main.dno.corp.redhat.com/job/mtv-2.10-ocp-4.20-test-release-non-gate/42/",
+      "ocp_version": "4.20"
     }
   ]
 }
@@ -198,9 +233,92 @@ cat job_status.json
       "job_url": "https://jenkins-csb-mtv-qe-main.dno.corp.redhat.com/job/mtv-2.10-ocp-4.20-test-release-gate/65/",
       "ocp_version": "4.20",
       "status": "SUCCESS"
+    },
+    {
+      "job_name": "mtv-2.10-ocp-4.20-test-release-non-gate",
+      "job_number": "42",
+      "job_url": "https://jenkins-csb-mtv-qe-main.dno.corp.redhat.com/job/mtv-2.10-ocp-4.20-test-release-non-gate/42/",
+      "ocp_version": "4.20",
+      "status": "SUCCESS"
     }
   ]
 }
+```
+
+## Job Types, Clusters, and Matrix Types
+
+### Job Suffixes
+
+The scripts support different job types through the `JOB_SUFFIX` parameter:
+
+- **`gate`**: Standard gate jobs (default)
+  - Job name pattern: `mtv-{version}-ocp-{ocp_version}-test-release-gate`
+  - Example: `mtv-2.10-ocp-4.19-test-release-gate`
+
+- **`non-gate`**: Non-gate jobs
+  - Job name pattern: `mtv-{version}-ocp-{ocp_version}-test-release-non-gate`
+  - Example: `mtv-2.10-ocp-4.19-test-release-non-gate`
+
+You can trigger multiple job types simultaneously by providing comma-separated values:
+```bash
+# Trigger both gate and non-gate jobs
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> <CLUSTER> 'gate,non-gate'
+```
+
+### Cluster Names
+
+The `CLUSTER_NAME` parameter specifies which Jenkins cluster to use. It supports:
+
+#### Single Cluster (All Jobs)
+When you provide a single value, it applies to all job suffixes:
+```bash
+# All jobs (gate and non-gate) use qemtv-01 cluster
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> 'qemtv-01' 'gate,non-gate'
+```
+
+#### Different Clusters Per Job Suffix
+You can specify different clusters for different job suffixes using mapping format:
+```bash
+# Gate jobs use qemtv-01, non-gate jobs use qemtv-02
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> 'gate:qemtv-01,non-gate:qemtv-02' 'gate,non-gate'
+```
+
+The mapping format is: `suffix1:cluster1,suffix2:cluster2`
+
+### Matrix Types
+
+The `MATRIX_TYPE` parameter controls which test matrix is executed. Supported values include:
+- `RELEASE`: Release test matrix (default)
+- `FULL`: Full test matrix
+- `STAGE`: Stage test matrix
+- `TIER1`: Tier 1 test matrix
+
+#### Single Matrix Type (All Jobs)
+When you provide a single value, it applies to all job suffixes:
+```bash
+# All jobs (gate and non-gate) use RELEASE matrix
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> <CLUSTER> 'gate,non-gate' 'RELEASE'
+```
+
+#### Different Matrix Types Per Job Suffix
+You can specify different matrix types for different job suffixes using mapping format:
+```bash
+# Gate jobs use RELEASE, non-gate jobs use FULL
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> <CLUSTER> 'gate,non-gate' 'gate:RELEASE,non-gate:FULL'
+```
+
+The mapping format is: `suffix1:type1,suffix2:type2`
+
+### Combining All Options
+
+You can combine cluster mapping and matrix type mapping for maximum flexibility:
+```bash
+# Gate jobs: qemtv-01 cluster with RELEASE matrix
+# Non-gate jobs: qemtv-02 cluster with FULL matrix
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> \
+  'gate:qemtv-01,non-gate:qemtv-02' \
+  'gate,non-gate' \
+  'gate:RELEASE,non-gate:FULL'
 ```
 
 ## Benefits of Bespoke Execution
@@ -227,7 +345,9 @@ The scripts send the following parameters to Jenkins jobs:
 - `DEPLOY_MTV`: Deploy MTV flag (true)
 - `GIT_BRANCH`: Git branch (main)
 - `IIB_NO`: Image Index Bundle
-- `MATRIX_TYPE`: Matrix type (RELEASE)
+- `MATRIX_TYPE`: Matrix type (default: RELEASE)
+  - Can be a single value (applies to all job suffixes): `RELEASE`, `FULL`, `STAGE`, `TIER1`
+  - Can be a mapping format (different types per suffix): `gate:RELEASE,non-gate:FULL`
 - `MTV_API_TEST_GIT_USER`: MTV API test git user (RedHatQE)
 - `MTV_SOURCE`: MTV source (KONFLUX)
 - `MTV_VERSION`: MTV version
