@@ -267,23 +267,44 @@ You can trigger multiple job types simultaneously by providing comma-separated v
 
 ### Cluster Names
 
-The `CLUSTER_NAME` parameter specifies which Jenkins cluster to use. It supports:
+The `CLUSTER_NAME` parameter specifies which Jenkins cluster to use. It supports multiple mapping formats:
 
 #### Single Cluster (All Jobs)
-When you provide a single value, it applies to all job suffixes:
+When you provide a single value, it applies to all jobs:
 ```bash
-# All jobs (gate and non-gate) use qemtv-01 cluster
+# All jobs use qemtv-01 cluster
 ./scripts/jenkins_call.sh <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> 'qemtv-01' 'gate,non-gate'
 ```
 
 #### Different Clusters Per Job Suffix
-You can specify different clusters for different job suffixes using mapping format:
+You can specify different clusters for different job suffixes:
 ```bash
 # Gate jobs use qemtv-01, non-gate jobs use qemtv-02
 ./scripts/jenkins_call.sh <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> 'gate:qemtv-01,non-gate:qemtv-02' 'gate,non-gate'
 ```
 
-The mapping format is: `suffix1:cluster1,suffix2:cluster2`
+#### Different Clusters Per OCP Version
+You can specify different clusters for different OCP versions:
+```bash
+# OCP 4.19 jobs use qemtv-01, OCP 4.20 jobs use qemtv-02
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> '4.19,4.20' <RC> '4.19:qemtv-01,4.20:qemtv-02' 'gate,non-gate'
+```
+
+#### Combined Mapping (OCP Version + Job Suffix)
+You can specify different clusters for each combination of OCP version and job suffix:
+```bash
+# OCP 4.19 gate -> qemtv-01, OCP 4.19 non-gate -> qemtv-02
+# OCP 4.20 gate -> qemtv-03, OCP 4.20 non-gate -> qemtv-04
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> '4.19,4.20' <RC> \
+  '4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03,4.20:non-gate:qemtv-04' \
+  'gate,non-gate'
+```
+
+**Mapping Format Priority:**
+1. Combined mapping (most specific): `ocp-version:suffix:cluster`
+2. OCP version mapping: `ocp-version:cluster`
+3. Suffix mapping: `suffix:cluster`
+4. Single value (least specific): `cluster`
 
 ### Matrix Types
 
@@ -313,10 +334,26 @@ The mapping format is: `suffix1:type1,suffix2:type2`
 
 You can combine cluster mapping and matrix type mapping for maximum flexibility:
 ```bash
+# Example 1: Different clusters per suffix, different matrix types per suffix
 # Gate jobs: qemtv-01 cluster with RELEASE matrix
 # Non-gate jobs: qemtv-02 cluster with FULL matrix
 ./scripts/jenkins_call.sh <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> \
   'gate:qemtv-01,non-gate:qemtv-02' \
+  'gate,non-gate' \
+  'gate:RELEASE,non-gate:FULL'
+
+# Example 2: Different clusters per OCP version, same matrix type
+# OCP 4.19: qemtv-01, OCP 4.20: qemtv-02
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> '4.19,4.20' <RC> \
+  '4.19:qemtv-01,4.20:qemtv-02' \
+  'gate,non-gate' \
+  'RELEASE'
+
+# Example 3: Combined mapping with different matrix types
+# OCP 4.19 gate -> qemtv-01/RELEASE, OCP 4.19 non-gate -> qemtv-02/FULL
+# OCP 4.20 gate -> qemtv-03/RELEASE, OCP 4.20 non-gate -> qemtv-04/FULL
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> '4.19,4.20' <RC> \
+  '4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03,4.20:non-gate:qemtv-04' \
   'gate,non-gate' \
   'gate:RELEASE,non-gate:FULL'
 ```
@@ -332,9 +369,88 @@ You can combine cluster mapping and matrix type mapping for maximum flexibility:
 
 ## Environment Variables
 
+### Required Variables
+
 All scripts require:
 - `JENKINS_USER`: Jenkins username
 - `JENKINS_TOKEN`: Jenkins API token
+
+### Optional Configuration Variables
+
+You have three flexible ways to configure cluster and matrix mappings:
+
+#### 1. JSON Configuration File (Recommended for Complex Configurations)
+
+Create a JSON config file (see `jenkins_config.example.json` for format):
+
+```json
+{
+  "clusters": {
+    "by_ocp_and_suffix": {
+      "4.19": {
+        "gate": "qemtv-01",
+        "non-gate": "qemtv-02"
+      },
+      "4.20": {
+        "gate": "qemtv-03",
+        "non-gate": "qemtv-04"
+      }
+    }
+  },
+  "matrix_types": {
+    "by_suffix": {
+      "gate": "RELEASE",
+      "non-gate": "FULL"
+    }
+  },
+  "job_suffixes": {
+    "common": ["gate", "non-gate"]
+  }
+}
+```
+
+**Usage:**
+```bash
+# Direct reference
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> '4.19,4.20' <RC> '@jenkins_config.json'
+
+# Via environment variable
+export JENKINS_CONFIG_FILE=jenkins_config.json
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> '4.19,4.20' <RC>
+```
+
+#### 2. Environment Variables (Good for Simple Cases)
+
+Set environment variables for cleaner calls:
+
+- `JENKINS_CONFIG_FILE`: Path to JSON config file (auto-used if CLUSTER_NAME not provided)
+- `JENKINS_CLUSTER_MAP`: Cluster mapping string (overrides CLUSTER_NAME argument if not provided)
+- `JENKINS_JOB_SUFFIX`: Job suffix (overrides JOB_SUFFIX argument if not provided)
+- `JENKINS_MATRIX_MAP`: Matrix type mapping string (overrides MATRIX_TYPE argument if not provided)
+
+**Example:**
+```bash
+export JENKINS_CLUSTER_MAP='4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03,4.20:non-gate:qemtv-04'
+export JENKINS_MATRIX_MAP='gate:RELEASE,non-gate:FULL'
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> '4.19,4.20' <RC> '' 'gate,non-gate'
+```
+
+#### 3. Inline Arguments (Best for Automation/Scripts)
+
+Pass mappings directly as arguments - perfect for automation where you want explicit control:
+
+```bash
+./scripts/jenkins_call.sh <IIB> <MTV_VERSION> '4.19,4.20' <RC> \
+  '4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03,4.20:non-gate:qemtv-04' \
+  'gate,non-gate' \
+  'gate:RELEASE,non-gate:FULL'
+```
+
+**Priority Order (highest to lowest):**
+1. Inline arguments (explicit)
+2. Environment variables
+3. JSON config file (if `JENKINS_CONFIG_FILE` is set or `@path` is used)
+4. Defaults
 
 ## Jenkins Job Parameters
 

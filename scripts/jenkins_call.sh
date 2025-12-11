@@ -28,8 +28,11 @@ validate_inputs() {
         log_error "  OCP_VERSIONS: Comma-separated OCP versions (e.g., '4.20,4.21')"
         log_error "  RC: Release candidate flag ('true' or 'false')"
         log_error "  CLUSTER_NAME: Jenkins cluster name (default: 'qemtv-01')"
-        log_error "               - Single value: applies to all job suffixes (e.g., 'qemtv-01', 'qemtv-02')"
-        log_error "               - Mapping format: different clusters per suffix (e.g., 'gate:qemtv-01,non-gate:qemtv-02')"
+        log_error "               - Single value: applies to all (e.g., 'qemtv-01')"
+        log_error "               - Suffix mapping: per job suffix (e.g., 'gate:qemtv-01,non-gate:qemtv-02')"
+        log_error "               - OCP mapping: per OCP version (e.g., '4.19:qemtv-01,4.20:qemtv-02')"
+        log_error "               - Combined mapping: per OCP and suffix (e.g., '4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03')"
+        log_error "               - Config file: use '@path/to/config.json' to load from JSON file"
         log_error "  JOB_SUFFIX: Job name suffix (default: 'gate', can be comma-separated, e.g., 'gate', 'non-gate', 'gate,non-gate')"
         log_error "  MATRIX_TYPE: Matrix type (default: 'RELEASE')"
         log_error "               - Single value: applies to all job suffixes (e.g., 'RELEASE', 'FULL', 'STAGE', 'TIER1')"
@@ -48,26 +51,40 @@ usage() {
     echo "  OCP_VERSIONS Comma-separated OCP versions (e.g., '4.20,4.21')"
     echo "  RC           Release candidate flag ('true' or 'false')"
     echo "  CLUSTER_NAME Jenkins cluster name (default: 'qemtv-01')"
-    echo "               - Single value: applies to all job suffixes (e.g., 'qemtv-01', 'qemtv-02')"
-    echo "               - Mapping format: different clusters per suffix (e.g., 'gate:qemtv-01,non-gate:qemtv-02')"
+    echo "               - Single value: applies to all (e.g., 'qemtv-01')"
+    echo "               - Suffix mapping: per job suffix (e.g., 'gate:qemtv-01,non-gate:qemtv-02')"
+    echo "               - OCP mapping: per OCP version (e.g., '4.19:qemtv-01,4.20:qemtv-02')"
+    echo "               - Combined mapping: per OCP and suffix (e.g., '4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03')"
+    echo "               - Config file: use '@path/to/config.json' to load from JSON file"
     echo "  JOB_SUFFIX   Job name suffix (default: 'gate', can be comma-separated, e.g., 'gate', 'non-gate', 'gate,non-gate')"
     echo "  MATRIX_TYPE  Matrix type (default: 'RELEASE')"
     echo "               - Single value: applies to all job suffixes (e.g., 'RELEASE', 'FULL', 'STAGE', 'TIER1')"
     echo "               - Mapping format: different matrix types per suffix (e.g., 'gate:RELEASE,non-gate:FULL')"
     echo
     echo "Environment Variables:"
-    echo "  JENKINS_USER    Jenkins username"
-    echo "  JENKINS_TOKEN   Jenkins API token"
+    echo "  JENKINS_USER        Jenkins username (required)"
+    echo "  JENKINS_TOKEN       Jenkins API token (required)"
+    echo "  JENKINS_CONFIG_FILE Path to JSON config file (optional, auto-used if CLUSTER_NAME not provided)"
+    echo "  JENKINS_CLUSTER_MAP Cluster mapping (optional, can override CLUSTER_NAME arg)"
+    echo "  JENKINS_JOB_SUFFIX  Job suffix (optional, can override JOB_SUFFIX arg)"
+    echo "  JENKINS_MATRIX_MAP  Matrix type mapping (optional, can override MATRIX_TYPE arg)"
     echo
     echo "Examples:"
+    echo "  # Basic usage"
     echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false'"
-    echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-02'"
-    echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20,4.21' 'true'"
-    echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'non-gate' 'FULL'"
-    echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'gate,non-gate' 'RELEASE'"
-    echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'qemtv-01' 'gate,non-gate' 'gate:RELEASE,non-gate:FULL'"
-    echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'gate:qemtv-01,non-gate:qemtv-02' 'gate,non-gate' 'RELEASE'"
-    echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.20' 'false' 'gate:qemtv-01,non-gate:qemtv-02' 'gate,non-gate' 'gate:RELEASE,non-gate:FULL'"
+    echo ""
+    echo "  # Using JSON config file (cleanest for complex configurations)"
+    echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.19,4.20' 'false' '@jenkins_config.json'"
+    echo ""
+    echo "  # Using environment variables"
+    echo "  export JENKINS_CLUSTER_MAP='4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03,4.20:non-gate:qemtv-04'"
+    echo "  export JENKINS_MATRIX_MAP='gate:RELEASE,non-gate:FULL'"
+    echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.19,4.20' 'false' '' 'gate,non-gate'"
+    echo ""
+    echo "  # Inline arguments (good for automation/scripts)"
+    echo "  $SCRIPT_NAME 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.19,4.20' 'false' \\"
+    echo "    '4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03,4.20:non-gate:qemtv-04' \\"
+    echo "    'gate,non-gate' 'gate:RELEASE,non-gate:FULL'"
 }
 
 # Main function
@@ -80,9 +97,48 @@ main() {
     local MTV_VERSION="$2"
     local OCP_VERSIONS="$3"
     local RC="$4"
-    local CLUSTER_NAME="${5:-qemtv-01}"  # Default to qemtv-01 if not provided
-    local JOB_SUFFIX="${6:-gate}"  # Default to "gate" for backward compatibility
-    local MATRIX_TYPE="${7:-RELEASE}"  # Default to "RELEASE" for backward compatibility
+    
+    # Check if CLUSTER_NAME is a config file reference (starts with @)
+    local CLUSTER_NAME="${5:-}"
+    local JOB_SUFFIX="${6:-}"
+    local MATRIX_TYPE="${7:-}"
+    
+    # Check for environment variable pointing to config file
+    if [ -z "$CLUSTER_NAME" ] && [ -n "${JENKINS_CONFIG_FILE:-}" ]; then
+      CLUSTER_NAME="@${JENKINS_CONFIG_FILE}"
+    fi
+    
+    # If CLUSTER_NAME starts with @, it's a config file reference
+    if [[ "$CLUSTER_NAME" =~ ^@ ]]; then
+      local config_file="${CLUSTER_NAME#@}"
+      # Expand environment variables in path
+      config_file=$(eval echo "$config_file")
+      # Expand ~ and resolve relative paths
+      config_file="${config_file/#\~/$HOME}"
+      if [[ ! "$config_file" =~ ^/ ]]; then
+        # Relative path - resolve from script directory
+        config_file="$(dirname "$0")/$config_file"
+      fi
+      
+      # Load configuration from file
+      local config_data
+      if ! config_data=$(load_config_from_file "$config_file"); then
+        log_error "Failed to load configuration from: $config_file"
+        exit 1
+      fi
+      
+      # Parse config data: CLUSTER_MAP|MATRIX_MAP|JOB_SUFFIX
+      IFS='|' read -r CLUSTER_NAME MATRIX_TYPE JOB_SUFFIX <<< "$config_data"
+      
+      # Override with explicit arguments if provided
+      JOB_SUFFIX="${6:-$JOB_SUFFIX}"
+      MATRIX_TYPE="${7:-$MATRIX_TYPE}"
+    else
+      # Use environment variables or defaults
+      CLUSTER_NAME="${CLUSTER_NAME:-${JENKINS_CLUSTER_MAP:-qemtv-01}}"
+      JOB_SUFFIX="${JOB_SUFFIX:-${JENKINS_JOB_SUFFIX:-gate}}"
+      MATRIX_TYPE="${MATRIX_TYPE:-${JENKINS_MATRIX_MAP:-RELEASE}}"
+    fi
     
     # Determine dev preview flag
     local DEV_PREVIEW="false"

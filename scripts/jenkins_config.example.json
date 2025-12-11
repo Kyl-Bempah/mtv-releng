@@ -1,0 +1,35 @@
+{
+  "clusters": {
+    "default": "qemtv-01",
+    "by_ocp_version": {
+      "4.19": "qemtv-01",
+      "4.20": "qemtv-02"
+    },
+    "by_suffix": {
+      "gate": "qemtv-01",
+      "non-gate": "qemtv-02"
+    },
+    "by_ocp_and_suffix": {
+      "4.19": {
+        "gate": "qemtv-01",
+        "non-gate": "qemtv-02"
+      },
+      "4.20": {
+        "gate": "qemtv-03",
+        "non-gate": "qemtv-04"
+      }
+    }
+  },
+  "matrix_types": {
+    "default": "RELEASE",
+    "by_suffix": {
+      "gate": "RELEASE",
+      "non-gate": "FULL"
+    }
+  },
+  "job_suffixes": {
+    "default": ["gate"],
+    "common": ["gate", "non-gate"]
+  }
+}
+
