@@ -37,6 +37,7 @@ load_config_from_file() {
   local cluster_map=""
   local matrix_map=""
   local job_suffix=""
+  local iib_map=""
   
   # Check for combined OCP+suffix cluster mapping (most specific)
   local combined_clusters=$(jq -r '.clusters.by_ocp_and_suffix // empty' "$config_file" 2>/dev/null)
@@ -123,8 +124,58 @@ load_config_from_file() {
     fi
   fi
   
-  # Output in format: CLUSTER_MAP|MATRIX_MAP|JOB_SUFFIX
-  echo "${cluster_map}|${matrix_map}|${job_suffix}"
+  # Extract IIB mapping
+  local combined_iibs=$(jq -r '.iibs.by_ocp_and_suffix // empty' "$config_file" 2>/dev/null)
+  if [ -n "$combined_iibs" ] && [ "$combined_iibs" != "null" ]; then
+    # Convert JSON to string format: "4.19:gate:forklift-fbc-prod-v420:on-pr-abc123,..."
+    local ocp_versions=$(echo "$combined_iibs" | jq -r 'keys[]' 2>/dev/null)
+    local iib_parts=()
+    for ocp_ver in $ocp_versions; do
+      local suffixes=$(echo "$combined_iibs" | jq -r ".[\"$ocp_ver\"] | keys[]" 2>/dev/null)
+      for suffix in $suffixes; do
+        local iib_val=$(echo "$combined_iibs" | jq -r ".[\"$ocp_ver\"][\"$suffix\"]" 2>/dev/null)
+        iib_parts+=("${ocp_ver}:${suffix}:${iib_val}")
+      done
+    done
+    if [ ${#iib_parts[@]} -gt 0 ]; then
+      iib_map=$(IFS=','; echo "${iib_parts[*]}")
+    fi
+  fi
+  
+  # If no combined mapping, check for OCP version mapping
+  if [ -z "$iib_map" ]; then
+    local ocp_iibs=$(jq -r '.iibs.by_ocp_version // empty' "$config_file" 2>/dev/null)
+    if [ -n "$ocp_iibs" ] && [ "$ocp_iibs" != "null" ]; then
+      local ocp_versions=$(echo "$ocp_iibs" | jq -r 'keys[]' 2>/dev/null)
+      local iib_parts=()
+      for ocp_ver in $ocp_versions; do
+        local iib_val=$(echo "$ocp_iibs" | jq -r ".[\"$ocp_ver\"]" 2>/dev/null)
+        iib_parts+=("${ocp_ver}:${iib_val}")
+      done
+      if [ ${#iib_parts[@]} -gt 0 ]; then
+        iib_map=$(IFS=','; echo "${iib_parts[*]}")
+      fi
+    fi
+  fi
+  
+  # If still no mapping, check for suffix mapping
+  if [ -z "$iib_map" ]; then
+    local suffix_iibs=$(jq -r '.iibs.by_suffix // empty' "$config_file" 2>/dev/null)
+    if [ -n "$suffix_iibs" ] && [ "$suffix_iibs" != "null" ]; then
+      local suffixes=$(echo "$suffix_iibs" | jq -r 'keys[]' 2>/dev/null)
+      local iib_parts=()
+      for suffix in $suffixes; do
+        local iib_val=$(echo "$suffix_iibs" | jq -r ".[\"$suffix\"]" 2>/dev/null)
+        iib_parts+=("${suffix}:${iib_val}")
+      done
+      if [ ${#iib_parts[@]} -gt 0 ]; then
+        iib_map=$(IFS=','; echo "${iib_parts[*]}")
+      fi
+    fi
+  fi
+  
+  # Output in format: CLUSTER_MAP|MATRIX_MAP|JOB_SUFFIX|IIB_MAP
+  echo "${cluster_map}|${matrix_map}|${job_suffix}|${iib_map}"
   return 0
 }
 
@@ -238,6 +289,120 @@ get_cluster_for_suffix() {
   else
     # Single value format - applies to all
     echo "$cluster_param"
+    return 0
+  fi
+}
+
+# Function to get IIB value for a specific OCP version and job suffix
+# Supports multiple mapping formats (same as cluster mapping):
+#   - Single value: "forklift-fbc-prod-v420:on-pr-abc123" (applies to all)
+#   - Suffix mapping: "gate:forklift-fbc-prod-v420:on-pr-abc123,non-gate:forklift-fbc-prod-v420:on-pr-xyz789" (per suffix)
+#   - OCP mapping: "4.19:forklift-fbc-prod-v420:on-pr-abc123,4.20:forklift-fbc-prod-v420:on-pr-xyz789" (per OCP version)
+#   - Combined mapping: "4.19:gate:forklift-fbc-prod-v420:on-pr-abc123,4.19:non-gate:forklift-fbc-prod-v420:on-pr-xyz789" (per OCP and suffix)
+get_iib_for_suffix() {
+  local iib_param="$1"
+  local openshift_version="$2"
+  local job_suffix="$3"
+  local default_iib="${4:-}"
+  
+  # If iib_param is empty, use default
+  if [ -z "$iib_param" ]; then
+    echo "$default_iib"
+    return 0
+  fi
+  
+  # Check if it's a mapping format (contains colon)
+  if [[ "$iib_param" =~ : ]]; then
+    IFS=',' read -ra IIB_MAPPINGS <<<"$iib_param"
+    
+    # First, check for combined format (ocp-version:suffix:iib) - most specific
+    for mapping in "${IIB_MAPPINGS[@]}"; do
+      mapping=$(echo "$mapping" | xargs)
+      
+      # Count colons to determine format
+      local colon_count=$(echo "$mapping" | tr -cd ':' | wc -c | xargs)
+      
+      if [ "$colon_count" -eq 2 ]; then
+        # Combined format: "4.19:gate:forklift-fbc-prod-v420:on-pr-abc123"
+        local ocp_part="${mapping%%:*}"
+        local remaining="${mapping#*:}"
+        local suffix_part="${remaining%%:*}"
+        local iib_part="${remaining#*:}"
+        
+        # Trim whitespace
+        ocp_part=$(echo "$ocp_part" | xargs)
+        suffix_part=$(echo "$suffix_part" | xargs)
+        iib_part=$(echo "$iib_part" | xargs)
+        
+        # Remove "ocp-" prefix if present for comparison
+        local ocp_clean="${ocp_part#ocp-}"
+        local version_clean="${openshift_version}"
+        
+        if [ "$ocp_clean" = "$version_clean" ] && [ "$suffix_part" = "$job_suffix" ]; then
+          echo "$iib_part"
+          return 0
+        fi
+      fi
+    done
+    
+    # Second, check for OCP version format (ocp-version:iib) - OCP-specific
+    for mapping in "${IIB_MAPPINGS[@]}"; do
+      mapping=$(echo "$mapping" | xargs)
+      local colon_count=$(echo "$mapping" | tr -cd ':' | wc -c | xargs)
+      
+      if [ "$colon_count" -eq 1 ]; then
+        local key_part="${mapping%%:*}"
+        local iib_part="${mapping#*:}"
+        
+        # Trim whitespace
+        key_part=$(echo "$key_part" | xargs)
+        iib_part=$(echo "$iib_part" | xargs)
+        
+        # Check if key_part looks like an OCP version (starts with number or "ocp-")
+        if [[ "$key_part" =~ ^[0-9] ]] || [[ "$key_part" =~ ^ocp- ]]; then
+          # OCP version format: "4.19:forklift-fbc-prod-v420:on-pr-abc123"
+          local ocp_clean="${key_part#ocp-}"
+          local version_clean="${openshift_version}"
+          
+          if [ "$ocp_clean" = "$version_clean" ]; then
+            echo "$iib_part"
+            return 0
+          fi
+        fi
+      fi
+    done
+    
+    # Third, check for suffix format (suffix:iib) - suffix-specific
+    for mapping in "${IIB_MAPPINGS[@]}"; do
+      mapping=$(echo "$mapping" | xargs)
+      local colon_count=$(echo "$mapping" | tr -cd ':' | wc -c | xargs)
+      
+      if [ "$colon_count" -eq 1 ]; then
+        local key_part="${mapping%%:*}"
+        local iib_part="${mapping#*:}"
+        
+        # Trim whitespace
+        key_part=$(echo "$key_part" | xargs)
+        iib_part=$(echo "$iib_part" | xargs)
+        
+        # Check if key_part is NOT an OCP version (doesn't start with number or "ocp-")
+        if [[ ! "$key_part" =~ ^[0-9] ]] && [[ ! "$key_part" =~ ^ocp- ]]; then
+          # Suffix format: "gate:forklift-fbc-prod-v420:on-pr-abc123"
+          if [ "$key_part" = "$job_suffix" ]; then
+            echo "$iib_part"
+            return 0
+          fi
+        fi
+      fi
+    done
+    
+    # No mapping found, use default
+    log_warning "No IIB mapping found for OCP version '$openshift_version' and suffix '$job_suffix', using default: $default_iib"
+    echo "$default_iib"
+    return 0
+  else
+    # Single value format - applies to all
+    echo "$iib_param"
     return 0
   fi
 }
@@ -481,6 +646,7 @@ trigger_all_jobs() {
   local cluster_name="${5:-qemtv-01}" # Default to qemtv-01 if not provided
   local job_suffix="${6:-gate}" # Default to "gate" for backward compatibility (can be comma-separated)
   local matrix_type="${7:-RELEASE}" # Default to "RELEASE" for backward compatibility
+  local iib_map="${8:-}" # Optional IIB mapping (if empty, uses single iib value for all)
 
   # Convert comma-separated OCP versions to array
   IFS=',' read -ra OCP_VERSIONS_ARRAY <<<"$ocp_versions"
@@ -504,8 +670,16 @@ trigger_all_jobs() {
       # Get matrix type for this specific suffix
       local suffix_matrix_type
       suffix_matrix_type=$(get_matrix_type_for_suffix "$matrix_type" "$suffix" "RELEASE")
+      
+      # Get IIB value for this specific OCP version and suffix (if mapping provided)
+      local suffix_iib
+      if [ -n "$iib_map" ]; then
+        suffix_iib=$(get_iib_for_suffix "$iib_map" "$openshift_version" "$suffix" "$iib")
+      else
+        suffix_iib="$iib"
+      fi
 
-      if ! trigger_jenkins_job "$openshift_version" "$iib" "$mtv_version" "$rc" "$suffix_cluster" "$suffix" "$suffix_matrix_type"; then
+      if ! trigger_jenkins_job "$openshift_version" "$suffix_iib" "$mtv_version" "$rc" "$suffix_cluster" "$suffix" "$suffix_matrix_type"; then
         log_error "Failed to trigger job for OCP version: $openshift_version, job suffix: $suffix, cluster: $suffix_cluster"
         return 1
       fi
@@ -562,20 +736,22 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
 
   case "${1:-}" in
   "trigger")
-    if [ $# -lt 5 ] || [ $# -gt 8 ]; then
-      echo "Usage: $0 trigger <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> [CLUSTER_NAME] [JOB_SUFFIX] [MATRIX_TYPE]"
+    if [ $# -lt 5 ] || [ $# -gt 9 ]; then
+      echo "Usage: $0 trigger <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> [CLUSTER_NAME] [JOB_SUFFIX] [MATRIX_TYPE] [IIB_MAP]"
       echo ""
       echo "Note: You can use environment variables or config files:"
       echo "  JENKINS_CONFIG_FILE - Path to JSON config file (use '@path' or set this env var)"
       echo "  JENKINS_CLUSTER_MAP - Cluster mapping (overrides CLUSTER_NAME if not provided)"
       echo "  JENKINS_JOB_SUFFIX  - Job suffix (overrides JOB_SUFFIX if not provided)"
       echo "  JENKINS_MATRIX_MAP  - Matrix type mapping (overrides MATRIX_TYPE if not provided)"
+      echo "  JENKINS_IIB_MAP     - IIB mapping (overrides IIB_MAP if not provided)"
       exit 1
     fi
     # Check if CLUSTER_NAME is a config file reference (starts with @)
-    local cluster_arg="${6:-}"
-    local suffix_arg="${7:-}"
-    local matrix_arg="${8:-}"
+    cluster_arg="${6:-}"
+    suffix_arg="${7:-}"
+    matrix_arg="${8:-}"
+    iib_map_arg="${9:-}"
     
     # Check for environment variable pointing to config file
     if [ -z "$cluster_arg" ] && [ -n "${JENKINS_CONFIG_FILE:-}" ]; then
@@ -584,7 +760,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     
     # If cluster_arg starts with @, it's a config file reference
     if [[ "$cluster_arg" =~ ^@ ]]; then
-      local config_file="${cluster_arg#@}"
+      config_file="${cluster_arg#@}"
       # Expand environment variables in path
       config_file=$(eval echo "$config_file")
       # Expand ~ and resolve relative paths
@@ -595,26 +771,28 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
       fi
       
       # Load configuration from file
-      local config_data
+      config_data=""
       if ! config_data=$(load_config_from_file "$config_file"); then
         echo "Error: Failed to load configuration from: $config_file" >&2
         exit 1
       fi
       
-      # Parse config data: CLUSTER_MAP|MATRIX_MAP|JOB_SUFFIX
-      IFS='|' read -r cluster_arg matrix_arg suffix_arg <<< "$config_data"
+      # Parse config data: CLUSTER_MAP|MATRIX_MAP|JOB_SUFFIX|IIB_MAP
+      IFS='|' read -r cluster_arg matrix_arg suffix_arg iib_map_from_config <<< "$config_data"
       
       # Override with explicit arguments if provided
       suffix_arg="${7:-$suffix_arg}"
       matrix_arg="${8:-$matrix_arg}"
+      iib_map_arg="${9:-${iib_map_from_config:-}}"
     else
       # Use environment variables or defaults
       cluster_arg="${cluster_arg:-${JENKINS_CLUSTER_MAP:-qemtv-01}}"
       suffix_arg="${suffix_arg:-${JENKINS_JOB_SUFFIX:-gate}}"
       matrix_arg="${matrix_arg:-${JENKINS_MATRIX_MAP:-RELEASE}}"
+      iib_map_arg="${iib_map_arg:-${JENKINS_IIB_MAP:-}}"
     fi
     
-    trigger_all_jobs "$2" "$3" "$4" "$5" "$cluster_arg" "$suffix_arg" "$matrix_arg"
+    trigger_all_jobs "$2" "$3" "$4" "$5" "$cluster_arg" "$suffix_arg" "$matrix_arg" "$iib_map_arg"
     export_job_data "job_tracking.json"
     ;;
   "import")
@@ -631,7 +809,7 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     echo "Usage: $0 {trigger|import|export} [args...]"
     echo
     echo "Commands:"
-    echo "  trigger <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> [CLUSTER_NAME] [JOB_SUFFIX] [MATRIX_TYPE]  - Trigger jobs and export data"
+    echo "  trigger <IIB> <MTV_VERSION> <OCP_VERSIONS> <RC> [CLUSTER_NAME] [JOB_SUFFIX] [MATRIX_TYPE] [IIB_MAP]  - Trigger jobs and export data"
     echo "  import <job_data_file>                                         - Import job data from file"
     echo "  export [output_file]                                           - Export current job data"
     echo
@@ -645,6 +823,11 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     echo "  MATRIX_TYPE: Matrix type (default: 'RELEASE')"
     echo "               - Single value: applies to all job suffixes (e.g., 'RELEASE', 'FULL', 'STAGE', 'TIER1')"
     echo "               - Mapping format: different matrix types per suffix (e.g., 'gate:RELEASE,non-gate:FULL')"
+    echo "  IIB_MAP: IIB mapping (optional, if not provided, uses single IIB value for all jobs)"
+    echo "          - Single value: applies to all (same as IIB argument)"
+    echo "          - Suffix mapping: per job suffix (e.g., 'gate:forklift-fbc-prod-v420:on-pr-abc123,non-gate:forklift-fbc-prod-v420:on-pr-xyz789')"
+    echo "          - OCP mapping: per OCP version (e.g., '4.19:forklift-fbc-prod-v420:on-pr-abc123,4.20:forklift-fbc-prod-v420:on-pr-xyz789')"
+    echo "          - Combined mapping: per OCP and suffix (e.g., '4.19:gate:forklift-fbc-prod-v420:on-pr-abc123,4.19:non-gate:forklift-fbc-prod-v420:on-pr-xyz789')"
     echo
     echo "Examples:"
     echo "  # Basic usage"
@@ -659,6 +842,10 @@ if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
     echo "  $0 trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.19,4.20' 'false' \\"
     echo "    '4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03,4.20:non-gate:qemtv-04' \\"
     echo "    'gate,non-gate' 'gate:RELEASE,non-gate:FULL'"
+    echo ""
+    echo "  # Different IIB values per job"
+    echo "  $0 trigger 'forklift-fbc-prod-v420:on-pr-abc123' '2.10.0' '4.19,4.20' 'false' 'qemtv-01' 'gate,non-gate' 'RELEASE' \\"
+    echo "    'gate:forklift-fbc-prod-v420:on-pr-abc123,non-gate:forklift-fbc-prod-v420:on-pr-xyz789'"
     echo "  $0 import job_tracking.json"
     echo "  $0 export my_jobs.json"
     exit 1
@@ -673,5 +860,6 @@ export -f trigger_jenkins_job
 export -f trigger_all_jobs
 export -f export_job_data
 export -f load_config_from_file
+export -f get_iib_for_suffix
 export JOB_TRACKING
 export JENKINS_BASE_URL

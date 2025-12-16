@@ -27,6 +27,27 @@
       "non-gate": "FULL"
     }
   },
+  "iibs": {
+    "default": "forklift-fbc-prod-v420:on-pr-abc123",
+    "by_ocp_version": {
+      "4.19": "forklift-fbc-prod-v420:on-pr-abc123",
+      "4.20": "forklift-fbc-prod-v420:on-pr-xyz789"
+    },
+    "by_suffix": {
+      "gate": "forklift-fbc-prod-v420:on-pr-abc123",
+      "non-gate": "forklift-fbc-prod-v420:on-pr-xyz789"
+    },
+    "by_ocp_and_suffix": {
+      "4.19": {
+        "gate": "forklift-fbc-prod-v420:on-pr-abc123",
+        "non-gate": "forklift-fbc-prod-v420:on-pr-xyz789"
+      },
+      "4.20": {
+        "gate": "forklift-fbc-prod-v420:on-pr-def456",
+        "non-gate": "forklift-fbc-prod-v420:on-pr-ghi789"
+      }
+    }
+  },
   "job_suffixes": {
     "default": ["gate"],
     "common": ["gate", "non-gate"]

@@ -330,6 +330,44 @@ You can specify different matrix types for different job suffixes using mapping 
 
 The mapping format is: `suffix1:type1,suffix2:type2`
 
+### IIB Values
+
+The `IIB_MAP` parameter allows you to specify different IIB (Image Index Bundle) values for different jobs. It supports the same mapping formats as clusters:
+
+#### Single IIB Value (All Jobs)
+When you provide a single IIB value (or omit IIB_MAP), it applies to all jobs:
+```bash
+# All jobs use the same IIB
+./scripts/jenkins_call.sh 'forklift-fbc-prod-v420:on-pr-abc123' <MTV_VERSION> <OCP_VERSIONS> <RC> <CLUSTER> 'gate,non-gate'
+```
+
+#### Different IIB Values Per Job Suffix
+You can specify different IIB values for different job suffixes:
+```bash
+# Gate jobs use one IIB, non-gate jobs use another
+./scripts/jenkins_call.sh 'forklift-fbc-prod-v420:on-pr-abc123' <MTV_VERSION> <OCP_VERSIONS> <RC> <CLUSTER> 'gate,non-gate' <MATRIX> \
+  'gate:forklift-fbc-prod-v420:on-pr-abc123,non-gate:forklift-fbc-prod-v420:on-pr-xyz789'
+```
+
+#### Different IIB Values Per OCP Version
+You can specify different IIB values for different OCP versions:
+```bash
+# OCP 4.19 uses one IIB, OCP 4.20 uses another
+./scripts/jenkins_call.sh 'forklift-fbc-prod-v420:on-pr-abc123' <MTV_VERSION> '4.19,4.20' <RC> <CLUSTER> 'gate,non-gate' <MATRIX> \
+  '4.19:forklift-fbc-prod-v420:on-pr-abc123,4.20:forklift-fbc-prod-v420:on-pr-xyz789'
+```
+
+#### Combined IIB Mapping (OCP Version + Job Suffix)
+You can specify different IIB values for each combination of OCP version and job suffix:
+```bash
+# OCP 4.19 gate -> IIB1, OCP 4.19 non-gate -> IIB2
+# OCP 4.20 gate -> IIB3, OCP 4.20 non-gate -> IIB4
+./scripts/jenkins_call.sh 'forklift-fbc-prod-v420:on-pr-abc123' <MTV_VERSION> '4.19,4.20' <RC> <CLUSTER> 'gate,non-gate' <MATRIX> \
+  '4.19:gate:forklift-fbc-prod-v420:on-pr-abc123,4.19:non-gate:forklift-fbc-prod-v420:on-pr-xyz789,4.20:gate:forklift-fbc-prod-v420:on-pr-def456,4.20:non-gate:forklift-fbc-prod-v420:on-pr-ghi789'
+```
+
+**Note:** The first IIB argument is still required and serves as the default value if no mapping is provided or if a mapping doesn't match.
+
 ### Combining All Options
 
 You can combine cluster mapping and matrix type mapping for maximum flexibility:
@@ -356,6 +394,18 @@ You can combine cluster mapping and matrix type mapping for maximum flexibility:
   '4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03,4.20:non-gate:qemtv-04' \
   'gate,non-gate' \
   'gate:RELEASE,non-gate:FULL'
+
+# Example 4: Different IIB values per job
+# Gate jobs use one IIB, non-gate jobs use another
+./scripts/jenkins_call.sh 'forklift-fbc-prod-v420:on-pr-abc123' <MTV_VERSION> <OCP_VERSIONS> <RC> <CLUSTER> 'gate,non-gate' <MATRIX> \
+  'gate:forklift-fbc-prod-v420:on-pr-abc123,non-gate:forklift-fbc-prod-v420:on-pr-xyz789'
+
+# Example 5: Full combination - different clusters, matrix types, and IIB values
+./scripts/jenkins_call.sh 'forklift-fbc-prod-v420:on-pr-abc123' <MTV_VERSION> '4.19,4.20' <RC> \
+  '4.19:gate:qemtv-01,4.19:non-gate:qemtv-02,4.20:gate:qemtv-03,4.20:non-gate:qemtv-04' \
+  'gate,non-gate' \
+  'gate:RELEASE,non-gate:FULL' \
+  '4.19:gate:forklift-fbc-prod-v420:on-pr-abc123,4.19:non-gate:forklift-fbc-prod-v420:on-pr-xyz789,4.20:gate:forklift-fbc-prod-v420:on-pr-def456,4.20:non-gate:forklift-fbc-prod-v420:on-pr-ghi789'
 ```
 
 ## Benefits of Bespoke Execution

@@ -1,0 +1,29 @@
+{
+  "clusters": {
+    "by_ocp_and_suffix": {
+      "4.21": {
+        "gate": "qemtv-01"
+      },
+      "4.20": {
+        "non-gate": "qemtv-02"
+      }
+    }
+  },
+  "matrix_types": {
+    "by_suffix": {
+      "gate": "RELEASE",
+      "non-gate": "TIER1"
+    }
+  },
+  "iibs": {
+    "by_ocp_version": {
+      "4.21": "forklift-fbc-prod-v421:on-pr-abc123",
+      "4.20": "forklift-fbc-prod-v420:on-pr-xyz789"
+    }
+  },
+  "job_suffixes": {
+    "default": ["gate"],
+    "common": ["gate", "non-gate"]
+  }
+}
+
