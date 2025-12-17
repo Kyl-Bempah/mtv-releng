@@ -13,9 +13,10 @@ source scripts/auth.sh
 
 ### Change this once we modify the clusters (if you want to disable a OCP version then use ["4.17"]="none")
 declare -A ocp_to_cluster_mappings=(
-  ["4.20"]="qemtv-01"
-  ["4.19"]="none"
-  ["4.18"]="none"
+  # ["4.21"]="qemtv-01"
+  ["4.20"]="qemtv-02"
+  # ["4.19"]="qemtv-03"
+  # ["4.18"]="qemtv-04"
 )
 
 # Get shas of the bundles in registry
@@ -27,7 +28,7 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
   log "Processing $version with $sha bundle..."
 
   # create PR with the bundle
-  scripts/create_iib_pr.sh main $version $sha
+  scripts/create_iib_pr.sh main $version $sha true
   if (($? != 0)); then
     log "Error occured, exiting..."
     exit 1
@@ -65,6 +66,7 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
     scripts/extract_diff.sh $current_iib $version $prev_iib $prev_version
     echo "Get diff"
   fi
+  #read -p "Modify the cmd_output, Continue?"
   iib_info=$(r_output)
 
   # prepare vars for sending a message
@@ -88,6 +90,7 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
     export last_build="$prev_ver_suffix $prev_iib"
     export changes=$(echo $iib_info | jq ".diffs")
   fi
+  #read -p "Continue to send slack msg?"
   scripts/iib_notify.sh
   for ocp in $(echo $ocp_urls | jq -r '. | keys.[]'); do
     ocp_ver=${ocp#*v}
@@ -99,6 +102,7 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
       continue
     else
       echo "jenkins_call" "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
+      #read -p "Continue to trigger jenkins testing?"
       scripts/jenkins_call.sh "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
     fi
   done
