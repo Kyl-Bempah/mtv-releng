@@ -13,7 +13,7 @@ source scripts/auth.sh
 
 ### Change this once we modify the clusters (if you want to disable a OCP version then use ["4.17"]="none")
 declare -A ocp_to_cluster_mappings=(
-  # ["4.21"]="qemtv-01"
+  ["4.21"]="qemtv-01"
   ["4.20"]="qemtv-02"
   # ["4.19"]="qemtv-03"
   # ["4.18"]="qemtv-04"
@@ -90,22 +90,36 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
     export last_build="$prev_ver_suffix $prev_iib"
     export changes=$(echo $iib_info | jq ".diffs")
   fi
-  #read -p "Continue to send slack msg?"
+  # read -p "Continue to send slack msg?"
   scripts/iib_notify.sh
-  for ocp in $(echo $ocp_urls | jq -r '. | keys.[]'); do
-    ocp_ver=${ocp#*v}
-    ocp_url=$(echo "$ocp_urls" | jq -r ".\"$ocp\"")
-    iib_short=${ocp_url##*/}
-    cluster=${ocp_to_cluster_mappings[$ocp_ver]}
-    if [[ $cluster == "" || $cluster == "none" ]]; then
-      echo "skipping jenkins_call" "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
-      continue
-    else
-      echo "jenkins_call" "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
-      #read -p "Continue to trigger jenkins testing?"
-      scripts/jenkins_call.sh "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
-    fi
-  done
+
+  ocp=$(echo $ocp_urls | jq -r '. | keys.[]')
+  ocp_ver=${ocp#*v}
+  ocp_url=$(echo "$ocp_urls" | jq -r ".\"$ocp\"")
+  iib_short=${ocp_url##*/}
+
+  if [[ $version == "2.11.0" ]]; then
+    scripts/jenkins_trigger.sh trigger "$iib_short" "$version" '4.21' 'false' 'qemtv-01' 'gate' 'RELEASE'
+    scripts/jenkins_trigger.sh trigger "$iib_short" "$version" '4.20' 'false' 'qemtv-02' 'non-gate' 'TIER1'
+  elif [[ $version == *"2.10"* ]]; then
+    scripts/jenkins_trigger.sh trigger "$iib_short" "$version" '4.20' 'true' 'qemtv-02' 'gate' 'RELEASE'
+    scripts/jenkins_trigger.sh trigger "$iib_short" "$version" '4.19' 'false' 'qemtv-03' 'non-gate' 'TIER1'
+  fi
+
+  # for ocp in $(echo $ocp_urls | jq -r '. | keys.[]'); do
+  #   ocp_ver=${ocp#*v}
+  #   ocp_url=$(echo "$ocp_urls" | jq -r ".\"$ocp\"")
+  #   iib_short=${ocp_url##*/}
+  #   cluster=${ocp_to_cluster_mappings[$ocp_ver]}
+  #   if [[ $cluster == "" || $cluster == "none" ]]; then
+  #     echo "skipping jenkins_call" "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
+  #     continue
+  #   else
+  #     echo "jenkins_call" "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
+  #     read -p "Continue to trigger jenkins testing?"
+  #     scripts/jenkins_call.sh "$iib_short" "$version" "$ocp_ver" 'true' "$cluster"
+  #   fi
+  # done
 
 done
 

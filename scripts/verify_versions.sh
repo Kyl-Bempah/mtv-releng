@@ -3,7 +3,7 @@ source scripts/util.sh
 # Print all the version configurations for our repositories
 
 # the oldest version onboarded to konflux (2.8) or the oldest version to process
-cutoff_ver="2.10"
+cutoff_ver="2.9"
 
 declare -a repos=(
   "forklift"

@@ -31,7 +31,9 @@ for branch in ${branches[@]}; do
     fi
   fi
   log "Getting stage bundle sha for version $version..."
-  bundle_sha=$(skopeo inspect docker://registry.stage.redhat.io/$registry/mtv-operator-bundle:$version | jq '.Digest')
+  bundle_url="registry.stage.redhat.io/$registry/mtv-operator-bundle:$version"
+  # bundle_url=$(scripts/replace_for_quay.sh $bundle_url $version)
+  bundle_sha=$(skopeo inspect docker://$bundle_url | jq '.Digest')
   if [[ -z $bundle_sha ]]; then
     log "Could not find released stage bundle for $version"
     continue

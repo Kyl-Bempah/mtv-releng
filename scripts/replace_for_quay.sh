@@ -33,8 +33,15 @@ cmps='{"mtv-controller-rhel9": "forklift-controller", "mtv-must-gather-rhel8": "
 img_sha=${img##*/}
 repo=${img#*/}
 repo=${repo%%/*}
-cmp=${img_sha%%@*}
-sha=${img_sha##*\:}
+
+# Check if the image has sha or just tag
+if [[ "$img_sha" == *"@"* ]]; then
+  cmp=${img_sha%%@*}
+  sha="@sha256:${img_sha##*\:}"
+else
+  cmp=${img_sha%%\:*}
+  sha=":${img_sha##*\:}"
+fi
 
 # save original component name before mapping
 orig_cmp=$cmp
@@ -60,8 +67,8 @@ if [[ "$orig_cmp" == "mtv-virt-v2v-rhel10" ]]; then
   else
     int_ver="int-"$cmp_ver
   fi
-  echo $registry"/forklift-operator-"$int_ver"/virt-v2v-"$int_ver"@sha256:"$sha
+  echo $registry"/forklift-operator-"$int_ver"/virt-v2v-"$int_ver$sha
 else
   registry="quay.io/redhat-user-workloads/rh-mtv-1-tenant"
-  echo $registry"/"forklift-operator-$cmp_ver"/"$cmp"-"$cmp_ver"@sha256:"$sha
+  echo $registry"/"forklift-operator-$cmp_ver"/"$cmp"-"$cmp_ver$sha
 fi
