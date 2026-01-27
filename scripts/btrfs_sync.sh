@@ -6,6 +6,7 @@ set -e
 
 # Source utility functions
 source scripts/util.sh
+source scripts/auth.sh
 
 # ============================================================================
 # Configuration Variables (can be overridden externally)
@@ -51,6 +52,8 @@ fi
 # ============================================================================
 # Main Sync Process
 # ============================================================================
+git config --global user.email "mtv-automation@redhat.com"
+git config --global user.name "MTV Bot - BTRFS Sync automation"
 
 tmp_dir=$(mktemp -d)
 log_info "Cloning repository to temporary directory: $tmp_dir"
@@ -61,6 +64,9 @@ git checkout $GIT_BRANCH
 
 log_info "Adding internal GitLab remote"
 git remote add internal $forklift_internal_repo
+
+log_info "Disable SSL verification"
+git config http.sslVerify "false"
 
 log_info "Pulling from internal repository (branch: $GIT_BRANCH)"
 git pull internal $GIT_BRANCH --rebase

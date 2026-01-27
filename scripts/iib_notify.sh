@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-source scripts/util.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/util.sh"
 
 # Send notification about new IIB to our slack channel
 
@@ -91,7 +93,7 @@ function sanitize {
 
 # prepare heading message
 version_info="IIB $iib_version | $date $time UTC"
-iib_heading=$(jq "(.channel |= \"$channel_id\") | (.blocks[0].text.text |= \"$version_info\") | ." templates/iib_heading.json 2> errors.log)
+iib_heading=$(jq "(.channel |= \"$channel_id\") | (.blocks[0].text.text |= \"$version_info\") | ." "$PROJECT_ROOT/templates/iib_heading.json" 2> errors.log)
 
 
 # post heading message (e.g. starting message of thread with details)
@@ -100,7 +102,7 @@ resp=$(curl --header "Authorization: Bearer $slack_auth_token" --header "Content
 
 if [[ $(echo $resp | jq '.ok' -r) == "false" ]]; then
   log "Error occured while sending the message to slack..."
-  scripts/error_notify.sh "$(echo errors.log)\n$resp"
+  "$SCRIPT_DIR/error_notify.sh" "$(echo errors.log)\n$resp"
   exit 1
 fi
 
@@ -169,7 +171,7 @@ fi
 # end query
 details_query+="."
 
-iib_details=$(jq "$details_query" templates/iib_details.json 2> errors.log)
+iib_details=$(jq "$details_query" "$PROJECT_ROOT/templates/iib_details.json" 2> errors.log)
 
 # post details in the thread
 echo "Sending reply to 'Header' message..."
@@ -181,5 +183,5 @@ if [[ $(echo $resp | jq '.ok' -r) == "false" ]]; then
   log "Error occured while sending the message to slack..."
   log "Deleting $ts header message that was already sent..."
   curl --header "Authorization: Bearer $slack_auth_token" --header "Content-Type: application/json" --request POST --data "{\"channel\": \"$channel_id\",\"ts\": \"$ts\"}" https://slack.com/api/chat.delete
-  scripts/error_notify.sh $(sanitize $(cat errors.log)) $resp
+  "$SCRIPT_DIR/error_notify.sh" $(sanitize $(cat errors.log)) $resp
 fi

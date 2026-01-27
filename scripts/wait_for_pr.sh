@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-source scripts/util.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/util.sh"
 
 # Waits until all konflux builds running for PR finish
 
@@ -36,7 +37,7 @@ while true; do
           log "Pipelines failed to build after $attempt retries... Please investigate..."
 
           # send error message to slack
-          scripts/error_notify.sh "*IIB build failure* $ocp\n Please check $pr_url for the failed pipeline..."
+          "$SCRIPT_DIR/error_notify.sh" "*IIB build failure* $ocp\n Please check $pr_url for the failed pipeline..."
           exit 1
         else
           attempt+=1

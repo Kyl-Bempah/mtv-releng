@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
-version="2-8-7"
-snapshot="forklift-operator-2-8-mpc7s"
-issues="""MTV-3218"""
+version="2-9-7"
+snapshot="forklift-operator-2-9-5sdzb"
+issues="""MTV-3960 MTV-4095"""
 
 declare -a rhel=("8" "9")
 xy=${version%-*}

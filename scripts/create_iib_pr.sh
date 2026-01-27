@@ -169,7 +169,7 @@ function process_catalog {
       ./generate-fbc.sh --init $ocp_ver 2> errors.log
       if (( $? != 0 )); then
         log "Catalog generation failed..."
-        scripts/error_notify.sh "Failed to init the $ocp_ver catalog for $version. \n$(cat errors.log)"
+        ../scripts/error_notify.sh "Failed to init the $ocp_ver catalog for $version. \n$(cat errors.log)"
         exit 1
       fi
     fi
@@ -188,7 +188,7 @@ function process_catalog {
         ./generate-fbc.sh --init $ocp_ver 2> errors.log
         if (( $? != 0 )); then
           log "Catalog generation failed..."
-          scripts/error_notify.sh "Failed to init the $ocp_ver catalog for $version. \n$(cat errors.log)"
+          ../scripts/error_notify.sh "Failed to init the $ocp_ver catalog for $version. \n$(cat errors.log)"
           rm errors.log
           exit 1
         fi
@@ -254,7 +254,7 @@ function process_catalog {
     ./generate-fbc.sh --render-template $ocp_ver 2> errors.log
     if (( $? != 0 )); then
       log "Catalog generation failed..."
-      scripts/error_notify.sh "Failed to render the $ocp_ver catalog for $version. \n$(cat errors.log)"
+      ../scripts/error_notify.sh "Failed to render the $ocp_ver catalog for $version. \n$(cat errors.log)"
       rm errors.log
       exit 1
     fi

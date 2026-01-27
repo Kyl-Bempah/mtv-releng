@@ -90,6 +90,11 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
     export last_build="$prev_ver_suffix $prev_iib"
     export changes=$(echo $iib_info | jq ".diffs")
   fi
+
+  if [[ -z $changes ]]; then
+    log "No extracted changes to send, exiting..."
+    exit 0
+  fi
   # read -p "Continue to send slack msg?"
   scripts/iib_notify.sh
 
