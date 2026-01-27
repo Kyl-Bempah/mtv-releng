@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-source scripts/util.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/util.sh"
 
 # Create a pull request with specified mtv versions and bundle shas
 
@@ -21,7 +23,7 @@ if [[ -z $1 || -z $2 || -z $3 ]]; then
 fi
 
 # get what version is dev-preview
-scripts/verify_versions.sh
+"$SCRIPT_DIR/verify_versions.sh"
 dp_ver=$(r_output | jq '.forklift.main' -r)
 
 # create temp dir
@@ -62,7 +64,7 @@ bundle_url="$registry/$repository/mtv-operator-bundle@sha256:$bundle_sha"
 
 # replace for quay url in case the bundle is not released yet
 if [[ -n $use_quay ]]; then
-  bundle_url=$(../scripts/replace_for_quay.sh $bundle_url $version)
+  bundle_url=$("$SCRIPT_DIR/replace_for_quay.sh" $bundle_url $version)
 fi
 
 # get bundle metadata
@@ -169,7 +171,7 @@ function process_catalog {
       ./generate-fbc.sh --init $ocp_ver 2> errors.log
       if (( $? != 0 )); then
         log "Catalog generation failed..."
-        ../scripts/error_notify.sh "Failed to init the $ocp_ver catalog for $version. \n$(cat errors.log)"
+        "$SCRIPT_DIR/error_notify.sh" "Failed to init the $ocp_ver catalog for $version. \n$(cat errors.log)"
         exit 1
       fi
     fi
@@ -188,7 +190,7 @@ function process_catalog {
         ./generate-fbc.sh --init $ocp_ver 2> errors.log
         if (( $? != 0 )); then
           log "Catalog generation failed..."
-          ../scripts/error_notify.sh "Failed to init the $ocp_ver catalog for $version. \n$(cat errors.log)"
+          "$SCRIPT_DIR/error_notify.sh" "Failed to init the $ocp_ver catalog for $version. \n$(cat errors.log)"
           rm errors.log
           exit 1
         fi
@@ -254,7 +256,7 @@ function process_catalog {
     ./generate-fbc.sh --render-template $ocp_ver 2> errors.log
     if (( $? != 0 )); then
       log "Catalog generation failed..."
-      ../scripts/error_notify.sh "Failed to render the $ocp_ver catalog for $version. \n$(cat errors.log)"
+      "$SCRIPT_DIR/error_notify.sh" "Failed to render the $ocp_ver catalog for $version. \n$(cat errors.log)"
       rm errors.log
       exit 1
     fi

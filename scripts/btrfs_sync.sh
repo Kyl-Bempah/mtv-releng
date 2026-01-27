@@ -5,8 +5,9 @@
 set -e
 
 # Source utility functions
-source scripts/util.sh
-source scripts/auth.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/util.sh"
+source "$SCRIPT_DIR/auth.sh"
 
 # ============================================================================
 # Configuration Variables (can be overridden externally)

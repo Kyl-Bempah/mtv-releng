@@ -6,7 +6,9 @@
 set -e
 
 # Source utility functions
-source scripts/util.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/util.sh"
 
 # ============================================================================
 # Configuration Variables (can be overridden externally)
@@ -21,11 +23,11 @@ source scripts/util.sh
 : "${TARGET_REPO:=Kyl-Bempah/forklift}"
 
 # Extraction script paths
-: "${LATEST_SNAPSHOT_SCRIPT:=./scripts/latest_snapshot.sh}"
-: "${SNAPSHOT_CONTENT_SCRIPT:=./scripts/snapshot_content.sh}"
+: "${LATEST_SNAPSHOT_SCRIPT:=$SCRIPT_DIR/latest_snapshot.sh}"
+: "${SNAPSHOT_CONTENT_SCRIPT:=$SCRIPT_DIR/snapshot_content.sh}"
 
 # Component mapping configuration file
-: "${COMPONENT_MAPPINGS_FILE:=./scripts/component_mappings.conf}"
+: "${COMPONENT_MAPPINGS_FILE:=$SCRIPT_DIR/component_mappings.conf}"
 
 # ============================================================================
 

@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Gets the latest successful release for specified version of forklift, e.g. forklift-operator-2-9...
 
@@ -15,4 +16,4 @@ if [[ -z $1 || -z $2 ]]; then
     exit 0
 fi
 
-scripts/latest_released_shas.sh $version $target 9 | grep bundle | awk '{ print $2 }'
+"$SCRIPT_DIR/latest_released_shas.sh" $version $target 9 | grep bundle | awk '{ print $2 }'

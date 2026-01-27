@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-source scripts/util.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/util.sh"
 
 # Get commit history from the specified iibs
 
@@ -17,10 +18,10 @@ if [[ -z $1 || -z $2 || -z $3 || -z $4 ]]; then
     exit 0
 fi
 
-scripts/extract_info.sh $new_iib $new_version
+"$SCRIPT_DIR/extract_info.sh" $new_iib $new_version
 new_iib_info=$(r_output)
 
-scripts/extract_info.sh $old_iib $old_version
+"$SCRIPT_DIR/extract_info.sh" $old_iib $old_version
 old_iib_info=$(r_output)
 
 new_iib_info=$(echo $new_iib_info | jq '. += {"diffs": {}}')
@@ -36,7 +37,7 @@ for origin in $(echo $new_iib_info | jq '.latest_commits | keys.[]' -r); do
     branch=release-$xy
   fi
   echo -e "\n$origin commits:"
-  scripts/commit_history.sh $origin $branch $(echo $old_iib_info | jq ".latest_commits.\"$origin\"" -r) $(echo $new_iib_info | jq ".latest_commits.\"$origin\"" -r)
+  "$SCRIPT_DIR/commit_history.sh" $origin $branch $(echo $old_iib_info | jq ".latest_commits.\"$origin\"" -r) $(echo $new_iib_info | jq ".latest_commits.\"$origin\"" -r)
   new_iib_info=$(echo $new_iib_info | jq ".diffs.\"$origin\" += $(r_output | jq -c)")
 done
 

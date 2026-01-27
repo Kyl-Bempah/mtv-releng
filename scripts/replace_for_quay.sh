@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-source scripts/util.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/util.sh"
 
 # Replaces prod and stage image urls with quay urls
 

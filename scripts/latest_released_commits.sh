@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 version=$1
 target=$2
@@ -18,9 +19,9 @@ fi
 declare -A images
 
 if [[ -z $3 ]]; then
-    images=$(scripts/latest_release.sh $version $target | xargs scripts/snapshot_from_release.sh | xargs scripts/snapshot_content.sh | jq '.[].containerImage' | jq --slurp '@sh')
+    images=$("$SCRIPT_DIR/latest_release.sh" $version $target | xargs "$SCRIPT_DIR/snapshot_from_release.sh" | xargs "$SCRIPT_DIR/snapshot_content.sh" | jq '.[].containerImage' | jq --slurp '@sh')
 else
-    images=$(scripts/latest_release.sh $version $target $rhel | xargs scripts/snapshot_from_release.sh | xargs scripts/snapshot_content.sh | jq '.[].containerImage' | jq --slurp '@sh')
+    images=$("$SCRIPT_DIR/latest_release.sh" $version $target $rhel | xargs "$SCRIPT_DIR/snapshot_from_release.sh" | xargs "$SCRIPT_DIR/snapshot_content.sh" | jq '.[].containerImage' | jq --slurp '@sh')
 fi
 
 images=${images:1:-1}
@@ -34,7 +35,7 @@ for img in $images; do
     IFS=''
 
     # Get commit
-    commit=$(scripts/component.sh ${img:1:-1} | grep 'COMMIT')
+    commit=$("$SCRIPT_DIR/component.sh" ${img:1:-1} | grep 'COMMIT')
     IFS=' '
     declare -a split 
     split=(echo $commit)

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-source scripts/util.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/util.sh"
 
 # Get commit history from the specified IIB
 
@@ -16,7 +17,7 @@ if [[ -z $1 || -z $2 ]]; then
 fi
 
 # get bundle image url present in the IIB
-scripts/iib.sh $iib_url $version
+"$SCRIPT_DIR/iib.sh" $iib_url $version
 bundle_img=$(r_output | jq '.BUNDLE_IMAGE' -r)
 log "# Bundle image extracted from IIB #"
 log "$bundle_img"
@@ -25,10 +26,10 @@ log "$bundle_img"
 bundle_original_url=$bundle_img
 
 # try to replace registry with quay
-bundle_img=$(scripts/replace_for_quay.sh $bundle_img $version)
+bundle_img=$("$SCRIPT_DIR/replace_for_quay.sh" $bundle_img $version)
 
 # get components from bundle
-scripts/bundle.sh $bundle_img
+"$SCRIPT_DIR/bundle.sh" $bundle_img
 cmps=$(r_output | jq '.' -r)
 
 # component origins
@@ -51,17 +52,17 @@ for cmp_name in $(echo $cmps | jq '. | keys.[]' -r); do
   origin=$(echo $origins | jq ".\"$img\"" -r)
 
   # try to replace for quay
-  cmp=$(scripts/replace_for_quay.sh $cmp $version)
+  cmp=$("$SCRIPT_DIR/replace_for_quay.sh" $cmp $version)
 
   # get commit from component image
-  scripts/component.sh $cmp
+  "$SCRIPT_DIR/component.sh" $cmp
   commit=$(r_output | jq '.COMMIT' -r)
 
   commits=$(echo $commits | jq ".+=[{\"cmp\":\"$cmp_name\",\"commit\":\"$commit\",\"origin\":\"$origin\"}]")
 done
 
 # also get bundle commit
-scripts/component.sh $bundle_img
+"$SCRIPT_DIR/component.sh" $bundle_img
 commit=$(r_output | jq '.[]' -r)
 
 # aggregate commits per origin

@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-source scripts/util.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/util.sh"
 
 iib_url=$1
 version=$2

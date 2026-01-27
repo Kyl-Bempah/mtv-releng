@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
-source scripts/util.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+source "$SCRIPT_DIR/util.sh"
 
 # Gets the latest released stage bundle sha for each MTV version
 # If the bundle is missing for latest version, it will not be included in the output
@@ -8,7 +9,7 @@ source scripts/util.sh
 # If "./latest_stage_bundles.sh 2.9.1" then only get stage bundle for that version
 filter_version=$1
 
-scripts/verify_versions.sh
+"$SCRIPT_DIR/verify_versions.sh"
 versions=$(r_output)
 
 declare -A shas

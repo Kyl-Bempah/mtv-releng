@@ -1,5 +1,7 @@
 #!/usr/bin/env bash
-source scripts/util.sh
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(dirname "$SCRIPT_DIR")"
+source "$SCRIPT_DIR/util.sh"
 
 # This script does all the neccessary tasks to create a new IIBs from latest released stage bundles
 # New IIB is created only when there are new changes (script is idempotent)
@@ -9,7 +11,7 @@ source scripts/util.sh
 filter_version=$1
 
 # authenticate to required services
-source scripts/auth.sh
+source "$SCRIPT_DIR/auth.sh"
 
 ### Change this once we modify the clusters (if you want to disable a OCP version then use ["4.17"]="none")
 declare -A ocp_to_cluster_mappings=(
@@ -20,7 +22,7 @@ declare -A ocp_to_cluster_mappings=(
 )
 
 # Get shas of the bundles in registry
-scripts/latest_stage_bundles.sh $filter_version
+"$SCRIPT_DIR/latest_stage_bundles.sh" $filter_version
 latest_shas=$(r_output)
 
 for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
@@ -28,7 +30,7 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
   log "Processing $version with $sha bundle..."
 
   # create PR with the bundle
-  scripts/create_iib_pr.sh main $version $sha true
+  "$SCRIPT_DIR/create_iib_pr.sh" main $version $sha true
   if (($? != 0)); then
     log "Error occured, exiting..."
     exit 1
@@ -52,7 +54,7 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
   # wait little bit for konflux webhooks to pickup the new builds, if any
   sleep 10
 
-  scripts/wait_for_pr.sh $pr_url "$ocp_vers"
+  "$SCRIPT_DIR/wait_for_pr.sh" $pr_url "$ocp_vers"
   # only continue if all pipelines succeeded
   if [[ $? == 1 ]]; then
     log "Error occured, exiting..."
@@ -61,9 +63,9 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
 
   if [[ $prev_iib == "none" ]]; then
     log "Could not find previous IIB build. Skipping diff extraction..."
-    scripts/extract_info.sh $current_iib $version
+    "$SCRIPT_DIR/extract_info.sh" $current_iib $version
   else
-    scripts/extract_diff.sh $current_iib $version $prev_iib $prev_version
+    "$SCRIPT_DIR/extract_diff.sh" $current_iib $version $prev_iib $prev_version
     echo "Get diff"
   fi
   #read -p "Modify the cmd_output, Continue?"
@@ -96,7 +98,7 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
     exit 0
   fi
   # read -p "Continue to send slack msg?"
-  scripts/iib_notify.sh
+  "$SCRIPT_DIR/iib_notify.sh"
 
   ocp=$(echo $ocp_urls | jq -r '. | keys.[]')
   ocp_ver=${ocp#*v}
@@ -104,11 +106,11 @@ for version in $(echo $latest_shas | jq '. | keys.[]' -r); do
   iib_short=${ocp_url##*/}
 
   if [[ $version == "2.11.0" ]]; then
-    scripts/jenkins_trigger.sh trigger "$iib_short" "$version" '4.21' 'false' 'qemtv-01' 'gate' 'RELEASE'
-    scripts/jenkins_trigger.sh trigger "$iib_short" "$version" '4.20' 'false' 'qemtv-02' 'non-gate' 'TIER1'
+    "$SCRIPT_DIR/jenkins_trigger.sh" trigger "$iib_short" "$version" '4.21' 'false' 'qemtv-01' 'gate' 'RELEASE'
+    "$SCRIPT_DIR/jenkins_trigger.sh" trigger "$iib_short" "$version" '4.20' 'false' 'qemtv-02' 'non-gate' 'TIER1'
   elif [[ $version == *"2.10"* ]]; then
-    scripts/jenkins_trigger.sh trigger "$iib_short" "$version" '4.20' 'true' 'qemtv-02' 'gate' 'RELEASE'
-    scripts/jenkins_trigger.sh trigger "$iib_short" "$version" '4.19' 'false' 'qemtv-03' 'non-gate' 'TIER1'
+    "$SCRIPT_DIR/jenkins_trigger.sh" trigger "$iib_short" "$version" '4.20' 'true' 'qemtv-02' 'gate' 'RELEASE'
+    "$SCRIPT_DIR/jenkins_trigger.sh" trigger "$iib_short" "$version" '4.19' 'false' 'qemtv-03' 'non-gate' 'TIER1'
   fi
 
   # for ocp in $(echo $ocp_urls | jq -r '. | keys.[]'); do
