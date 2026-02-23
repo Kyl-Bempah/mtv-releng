@@ -1,0 +1,25 @@
+[
+  {
+    "type": "rich_text_section",
+    "elements": [
+      {
+        "type": "text",
+        "text": "4.20",
+        "style": {
+          "bold": true
+        }
+      },
+      {
+        "type": "text",
+        "text": " "
+      },
+      {
+        "type": "text",
+        "text": "redhat.io",
+        "style": {
+          "unlink": true
+        }
+      }
+    ]
+  }
+]

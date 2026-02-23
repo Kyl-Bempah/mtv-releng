@@ -1,0 +1,189 @@
+import logging
+import time
+
+import jenkins
+from auth.auth import JenkinsAuth
+from config import config
+from models.dto import JenkinsJobDTO
+
+logger = logging.getLogger(__name__)
+import asyncio
+
+
+class JenkinsManager:
+    def __init__(self, url, verify_ssl=False):
+        auth = JenkinsAuth()
+        self.server = jenkins.Jenkins(
+            url, username=auth.user, password=auth.token
+        )
+        # Handle self-signed certs
+        if not verify_ssl:
+            self.server._session.verify = config.get_root_cert_path()
+
+    # returns queue_id
+    def trigger_job(self, job_name: str, params=None) -> int:
+        logger.info(f"Triggering jenkins job '{job_name}'")
+        try:
+            return int(self.server.build_job(job_name, parameters=params))
+        except jenkins.NotFoundException as ex:
+            logger.error(ex)
+            return 0
+
+    # returns build bumber
+    async def wait_for_build_to_start(self, queue_id: int) -> int:
+        logger.info(f"Waiting for build to start from queue '{queue_id}'")
+        interval = config.get_jenkins_wait_refresh_seconds()
+        while True:
+            item = self.server.get_queue_item(queue_id)
+            build_number = item.get("executable", {}).get("number")
+            if build_number:
+                logger.info(f"Build '{build_number}' started")
+                return int(build_number)
+            await asyncio.sleep(interval)
+
+    # returns build info
+    async def wait_for_completion(
+        self, job_name: str, build_number: int
+    ) -> dict:
+        logger.info(f"Waiting for build to finish {job_name}/{build_number}")
+        interval = config.get_jenkins_wait_refresh_seconds()
+        while True:
+            info = self.server.get_build_info(job_name, build_number)
+            logger.info(
+                f"Build {job_name}/{build_number} is still in progress"
+            )
+            logger.debug(f"Job info: {info}")
+            if not info["building"]:
+                return info
+            await asyncio.sleep(interval)
+
+    async def run_job(self, job_name: str, params=None) -> int:
+        q_id = self.trigger_job(job_name, params)
+        if not q_id:
+            return 0
+        bn = await self.wait_for_build_to_start(q_id)
+
+        return bn
+
+    def get_mtv_ci_args(self):
+        return {
+            "BRANCH": "master",
+            "CLUSTER_NAME": "",
+            "DEPLOY_MTV": "true",
+            "GIT_BRANCH": "main",
+            "IIB_NO": "",
+            "MATRIX_TYPE": "",
+            "MTV_API_TEST_GIT_USER": "RedHatQE",
+            "MTV_SOURCE": "KONFLUX",
+            "MTV_VERSION": "",
+            "MTV_XY_VERSION": "",
+            "NFS_SERVER_IP": "f02-h06-000-r640.rdu2.scalelab.redhat.com",
+            "NFS_SHARE_PATH": "/home/nfsshare",
+            "OCP_VERSION": "",
+            "OCP_XY_VERSION": "",
+            "OPENSHIFT_PYTHON_WRAPPER_GIT_BRANCH": "main",
+            "PYTEST_EXTRA_PARAMS": "--tc=release_test:true --tc=target_ocp_version:{ocp}",
+            "RC": True,
+            "REMOTE_CLUSTER_NAME": "",
+            "RUN_TESTS_IN_PARALLEL": "false",
+            "CLEAN_CATALOG": "true",
+            "ENABLE_JIRA": "true",
+        }
+
+    def get_test_release_gate_args(
+        self, mtv_version: str, ocp_version: str, iib: str
+    ) -> dict:
+        cluster_mappings = config.get_cluster_mappings()
+        args = self.get_mtv_ci_args()
+        args["IIB_NO"] = iib
+        args["MTV_VERSION"] = mtv_version
+        args["MTV_XY_VERSION"] = ".".join(mtv_version.split(".")[:2])
+        args["OCP_VERSION"] = ocp_version
+        args["OCP_XY_VERSION"] = ocp_version
+        args["PYTEST_EXTRA_PARAMS"] = args["PYTEST_EXTRA_PARAMS"].replace(
+            "{ocp}", ocp_version
+        )
+        args["MATRIX_TYPE"] = "RELEASE"
+        cluster = cluster_mappings.get(ocp_version, "")
+        if not cluster:
+            raise ValueError(
+                f"OCP {ocp_version} not in cluster mappings {cluster_mappings}"
+            )
+        if cluster.lower() == "none":
+            logger.warning(
+                f"OCP {ocp_version} disabled in cluster mappings {cluster_mappings}"
+            )
+            return {}
+        args["CLUSTER_NAME"] = cluster
+        args["REMOTE_CLUSTER_NAME"] = cluster
+        return args
+
+    def get_test_release_non_gate_args(
+        self, mtv_version: str, ocp_version: str, iib: str
+    ) -> dict:
+        cluster_mappings = config.get_cluster_mappings()
+        args = self.get_mtv_ci_args()
+        args["IIB_NO"] = iib
+        args["MTV_VERSION"] = mtv_version
+        args["MTV_XY_VERSION"] = ".".join(mtv_version.split(".")[:2])
+        args["OCP_VERSION"] = ocp_version
+        args["OCP_XY_VERSION"] = ocp_version
+        args["PYTEST_EXTRA_PARAMS"] = args["PYTEST_EXTRA_PARAMS"].replace(
+            "{ocp}", ocp_version
+        )
+        args["MATRIX_TYPE"] = "TIER1"
+        cluster = cluster_mappings.get(ocp_version, "")
+        if not cluster:
+            raise ValueError(
+                f"OCP {ocp_version} not in cluster mappings {cluster_mappings}"
+            )
+        if cluster.lower() == "none":
+            logger.warning(
+                f"OCP {ocp_version} disabled in cluster mappings {cluster_mappings}"
+            )
+            return {}
+        args["CLUSTER_NAME"] = cluster
+        args["REMOTE_CLUSTER_NAME"] = cluster
+        return args
+
+    async def trigger_release_gate(
+        self, mtv_version: str, ocp_version: str, iib: str
+    ) -> dict:
+        ci_args = self.get_test_release_gate_args(
+            mtv_version, ocp_version.replace("v", ""), iib
+        )
+        if not ci_args:
+            logger.warning(
+                f"Missing arguments, can't trigger a job for {ocp_version}/{mtv_version}"
+            )
+            return {}
+        mtv_xy = ".".join(mtv_version.split(".")[:2])
+        ocp_wv = ocp_version.replace("v", "")
+
+        job_name = f"mtv-{mtv_xy}-ocp-{ocp_wv}-test-release-gate"
+        job_number = await self.run_job(job_name, ci_args)
+        if job_number:
+            return {"job_name": job_name, "job_number": job_number}
+        else:
+            return {}
+
+    async def trigger_release_non_gate(
+        self, mtv_version: str, ocp_version: str, iib: str
+    ) -> dict:
+        ci_args = self.get_test_release_non_gate_args(
+            mtv_version, ocp_version.replace("v", ""), iib
+        )
+        if not ci_args:
+            logger.warning(
+                f"Missing arguments, can't trigger a job for {ocp_version}/{mtv_version}"
+            )
+            return {}
+        mtv_xy = ".".join(mtv_version.split(".")[:2])
+        ocp_wv = ocp_version.replace("v", "")
+
+        job_name = f"mtv-{mtv_xy}-ocp-{ocp_wv}-test-release-non-gate"
+        job_number = await self.run_job(job_name, ci_args)
+        if job_number:
+            return {"job_name": job_name, "job_number": job_number}
+        else:
+            return {}

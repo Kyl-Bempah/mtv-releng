@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 
+cluster="https://api.stone-prd-rh01.pg1f.p1.openshiftapps.com:6443"
 version=$1
 
 # Print Usage if argument is missing
@@ -9,6 +10,12 @@ if [[ -z $1 ]]; then
   echo "./rebuild_all.sh dev-preview"
   exit 0
 fi
+
+if ! [[ $(oc status | grep -wo $cluster) ]]; then
+  oc login --web $cluster
+fi
+
+oc project rh-mtv-1-tenant
 
 oc annotate components/forklift-api-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/forklift-cli-download-$version build.appstudio.openshift.io/request=trigger-pac-build

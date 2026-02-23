@@ -1,0 +1,13 @@
+[
+  {
+    "type": "header",
+    "text": {
+      "type": "plain_text",
+      "text": "",
+      "emoji": true
+    }
+  },
+  {
+    "type": "divider"
+  }
+]

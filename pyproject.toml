@@ -1,0 +1,29 @@
+[project]
+name = "mtv_pipelines"
+version = "0.1.0"
+description = ""
+authors = [{ name = "Stefan Olenocin", email = "solenoci@redhat.com" }]
+readme = "README.md"
+requires-python = ">=3.14"
+dependencies = [
+  "slack-sdk (>=3.40.1,<4.0.0)",
+  "typeguard (>=4.5.1,<5.0.0)",
+  "semver (>=3.0.4,<4.0.0)",
+  "requests (>=2.32.5,<3.0.0)",
+  "gitpython (>=3.1.46,<4.0.0)",
+  "pydantic (>=2.12.5,<3.0.0)",
+  "pyyaml (>=6.0.3,<7.0.0)",
+  "python-jenkins (>=1.8.3,<2.0.0)",
+]
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"
+
+
+[tool.black]
+line-length = 79
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"

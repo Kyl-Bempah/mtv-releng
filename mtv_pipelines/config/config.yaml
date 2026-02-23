@@ -1,0 +1,189 @@
+# Operator name
+operator_name: "mtv-operator"
+
+# Versions that are lower than cutoff will not be processed by automation
+mtv_cutoff_version: "2.10.5"
+
+# First MTV version that has CPE label
+# CPEs started with MTV 2.9.5 (https://github.com/kubev2v/forklift/commit/b2ba256c97a03ad47fb3717a50f92397b6b4a297)
+mtv_cpe_version_init: "2.9.5"
+
+# Cluster to OCP version mapping
+# if you want to disable CI for some OCP version, use "none"
+cluster_mappings:
+  "4.22": "none"
+  "4.21": "qemtv-01"
+  "4.20": "qemtv-02"
+  "4.19": "qemtv-03"
+  "4.18": "none"
+
+# Current MTV versions (not used for anything yet)
+versions:
+  "main": "2.12.0"
+  "release-2.11": "2.11.0"
+  "release-2.10": "2.10.3"
+  "release-2.9": "2.9.7"
+  "release-2.8": "2.8.9"
+
+# Used for tracking the "konflux enabled" branches
+branches:
+  - "main"
+  - "release-2.11"
+  - "release-2.10"
+  - "release-2.9"
+  - "release-2.8"
+
+# MTV FBC repository url
+fbc_repo: "https://github.com/kubev2v/mtv-fbc"
+
+# MTV automation settings
+git_name: "MTV Bot - IIB Automation"
+git_email: "mtv-automation@redhat.com"
+git_label: "automation"
+
+# FBC fragment image URL template
+fbc_component_url: "quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-fbc-prod-{ocp}:on-pr-{commit}"
+
+# FBC component konflux name template
+fbc_component_name: "forklift-fbc-comp-prod-{ocp}"
+
+# Image registriy namespaces
+dev_preview_namespace: "mtv-candidate"
+release_namespace: "migration-toolkit-virtualization"
+
+# Arbitrary number of commits for history
+# Assuming that there will never be more than 200 IIB builds for version
+iib_max_commits: 200
+
+# Commit message character limit of what is shown in slack
+commit_character_limit: 50
+
+# Maximum retries for FBC PR check retries
+fbc_pr_max_retries: 3
+
+# How long to wait for before requesting data from the FBC PR
+fbc_pr_refresh_seconds: 120
+
+# Slack API
+slack_api: "https://slack.com/api/"
+
+# Slack channel to send build info to
+slack_builds_channel: "C09DS44AQ65" # mtv-builds "C09DS44AQ65" # solenoci-test "C09BUM6ATBR"
+
+# Slack channel to send the errors to
+slack_errors_channel: "C09DRKZRQ4U"
+
+# slack users to tag on CI failure
+slack_failure_mentions:
+  - "U04NPAUEAR1|solenoci"
+  - "U018XG9RSP7|myakove"
+  - "U03SLKWH0DR|mkrcmari"
+
+# Templates direcotry
+templates_dir: "project/templates"
+
+# Jira
+jira_issues: "https://issues.redhat.com/"
+
+# Root cert path inside the container
+root_cert_path: "/home/solenoci/repos/mtv-releng/root.pem"
+
+# Jenkins url
+jenkins_url: "https://jenkins-csb-mtv-qe-main.dno.corp.redhat.com"
+
+# Jenkins wait refresh interval
+jenkins_wait_refresh_seconds: 60
+
+# Jenkins analyzer URL
+jenkins_analyzer_url: "https://jenkins-job-insight-mtv-team.apps.cnv2.engineering.redhat.com"
+
+# Allowed jira project keys, used for slack message
+allowed_project_keys:
+  - "MTV"
+  - "RHEL"
+  - "KONFLUX"
+  - "ECOPROJECT"
+  - "CNV"
+
+# Forklift "component" repositories
+repositories:
+  forklift: "https://github.com/kubev2v/forklift"
+  forklift-console-plugin: "https://github.com/kubev2v/forklift-console-plugin"
+  forklift-must-gather: "https://github.com/kubev2v/forklift-must-gather"
+  # forklift-int: "https://gitlab.cee.redhat.com/mtv/forklift" # don't use internal git because it needs auth
+
+# Raw mappings
+raw_mappings:
+  forklift: "https://raw.githubusercontent.com/kubev2v/forklift/refs/heads/{branch}/build/release.conf"
+  forklift-console-plugin: "https://raw.githubusercontent.com/kubev2v/forklift-console-plugin/refs/heads/{branch}/build/release.conf"
+  forklift-must-gather: "https://raw.githubusercontent.com/kubev2v/forklift-must-gather/refs/heads/{branch}/build/release.conf"
+  forklift-int: "https://gitlab.cee.redhat.com/mtv/forklift/-/raw/{branch}/build/release.conf"
+
+# Component mappings
+# mapping key = Downstream name of the component (e.g. image repository in comet)
+# upstream = Upstream name of the component (e.g. image repository in konflux)
+# origin = git repository URL mappings (from "repositories" config setting)
+cmp_mappings:
+  mtv-controller-rhel9:
+    upstream: "forklift-controller"
+    origin: "forklift"
+
+  mtv-must-gather-rhel8:
+    upstream: "forklift-must-gather"
+    origin: "forklift-must-gather"
+
+  mtv-validation-rhel9:
+    upstream: "validation"
+    origin: "forklift"
+
+  mtv-api-rhel9:
+    upstream: "forklift-api"
+    origin: "forklift"
+
+  mtv-populator-controller-rhel9:
+    upstream: "populator-controller"
+    origin: "forklift"
+
+  mtv-rhv-populator-rhel8:
+    upstream: "ovirt-populator"
+    origin: "forklift"
+
+  mtv-virt-v2v-rhel9:
+    upstream: "virt-v2v"
+    origin: "forklift"
+
+  mtv-openstack-populator-rhel9:
+    upstream: "openstack-populator"
+    origin: "forklift"
+
+  mtv-console-plugin-rhel9:
+    upstream: "forklift-console-plugin"
+    origin: "forklift-console-plugin"
+
+  mtv-ova-provider-server-rhel9:
+    upstream: "ova-provider-server"
+    origin: "forklift"
+
+  mtv-vsphere-xcopy-volume-populator-rhel9:
+    upstream: "vsphere-xcopy-volume-populator"
+    origin: "forklift"
+
+  mtv-rhel9-operator:
+    upstream: "forklift-operator"
+    origin: "forklift"
+
+  mtv-operator-bundle:
+    upstream: "forklift-operator-bundle"
+    origin: "forklift"
+
+  mtv-cli-download-rhel9:
+    upstream: "forklift-cli-download"
+    origin: "forklift"
+
+  mtv-ova-proxy-rhel9:
+    upstream: "forklift-ova-proxy"
+    origin: "forklift"
+
+  mtv-virt-v2v-rhel10:
+    upstream: "virt-v2v"
+    origin: "forklift" # use public git because internal breaks auth
