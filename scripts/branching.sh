@@ -1,5 +1,5 @@
 # Before running the script, read it through and understand what it does.
-# Also, modify the forks of the repositories to your own!  
+# Also, modify the forks of the repositories to your own!
 
 # This script is intended to help and automate tasks related to branching of MTV operator.
 # It's "modular" so you can choose what steps you want to execute and what to skip.
@@ -10,7 +10,6 @@
 # - pushes the changes into user's fork of the repository
 # - creates neccessary files for konflux with correct values
 # - pushes the changes to konflux releng repo
-
 
 konflux_releng="git@gitlab.cee.redhat.com:releng/konflux-release-data.git"
 
@@ -23,18 +22,20 @@ fork_forklift_url="git@github.com:solenoci/forklift.git"
 fork_forklift_console_plugin_url="git@github.com:solenoci/forklift-console-plugin.git"
 fork_forklift_must_gather_url="git@github.com:solenoci/forklift-must-gather.git"
 
-
 # If the script should delete the working directory at the end
 cleanup="true"
 
 # Modify release.conf file with user input values
-release_conf_forklift () {
-cat << EOF > build/release.conf
+release_conf_forklift() {
+  cat <<EOF >build/release.conf
 # Global version specifying version for every component and for bundle, format "x.y.z"
-VERSION=$version
+MTV_VERSION=$version
 
 # Release version, format "vX.Y"
 RELEASE=$release
+
+# This setting must mirror the Y stream version specified above, e.g. if RELEASE == v2.10 then CPE == 2.10 (without the "v")
+CPE=2.11
 
 # Operator channel where the version will be deployed, e.g. dev-preview, release-v2.9 ...
 CHANNEL=$channel
@@ -51,13 +52,16 @@ EOF
 }
 
 # Modify release.conf file with user input values
-release_conf_console_plugin () {
-cat << EOF > build/release.conf
+release_conf_console_plugin() {
+  cat <<EOF >build/release.conf
 # Global version specifying version for every component and for bundle, format "x.y.z"
 RVERSION=$version
 
 # Release version, format "vX.Y"
 RELEASE=$release
+
+# This setting must mirror the Y stream version specified above, e.g. if RELEASE == v2.10 then CPE == 2.10 (without the "v")
+CPE=2.11
 
 # Operator channel where the version will be deployed, e.g. dev-preview, release-v2.9 ...
 CHANNEL=$channel
@@ -71,13 +75,16 @@ EOF
 }
 
 # Modify release.conf file with user input values
-release_conf_must_gather () {
-cat << EOF > build/release.conf
+release_conf_must_gather() {
+  cat <<EOF >build/release.conf
 # Global version specifying version for every component and for bundle, format "x.y.z"
 VERSION=$version
 
 # Release version, format "vX.Y"
 RELEASE=$release
+
+# This setting must mirror the Y stream version specified above, e.g. if RELEASE == v2.10 then CPE == 2.10 (without the "v")
+CPE=2.11
 
 # Operator channel where the version will be deployed, e.g. dev-preview, release-v2.9 ...
 CHANNEL=$channel
@@ -91,55 +98,55 @@ EOF
 }
 
 # Process git repository and modify needed things
-process_repo () {
-    # Create a release branch, example: release-2.9
-    git checkout -b release-${version%.*}
-    echo "Will create a new release branch from main and push it to remote without any changes..."
-    read -p "Continue? (Y/N): " confirm 
-    if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-        git push origin release-${version%.*}
-        echo "release-${version%.*} branch was created in remote repository..."
-    else
-        echo "Skipped push to remote repository, you can still create the branch manually..."
-    fi
+process_repo() {
+  # Create a release branch, example: release-2.9
+  git checkout -b release-${version%.*}
+  echo "Will create a new release branch from main and push it to remote without any changes..."
+  read -p "Continue? (Y/N): " confirm
+  if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
+    git push origin release-${version%.*}
+    echo "release-${version%.*} branch was created in remote repository..."
+  else
+    echo "Skipped push to remote repository, you can still create the branch manually..."
+  fi
 
-    git checkout -b CF-$version
+  git checkout -b CF-$version
 
-    # Modify release.conf file
-    release_conf=$1
-    $release_conf
+  # Modify release.conf file
+  release_conf=$1
+  $release_conf
 
-    # Rename all files in .tekton/ to include the version instead of dev-preview, example: virt-v2v-dev-preview-on-push.yaml -> virt-v2v-2-9-on-push.yaml
-    for i in .tekton/*; do
-        mv "$i" "$(echo $i | sed "s/dev-preview/$version_name/")";
-    done
+  # Rename all files in .tekton/ to include the version instead of dev-preview, example: virt-v2v-dev-preview-on-push.yaml -> virt-v2v-2-9-on-push.yaml
+  for i in .tekton/*; do
+    mv "$i" "$(echo $i | sed "s/dev-preview/$version_name/")"
+  done
 
-    # The "pipelinesascode.tekton.dev/on-cel-expression" annotation in .tekton/ files should be adjusted to specify and filter by the right branch name, example: main -> release-2.9
-    sed -i -e "s/\"main\"/\"release-${version%.*}\"/g" .tekton/*
+  # The "pipelinesascode.tekton.dev/on-cel-expression" annotation in .tekton/ files should be adjusted to specify and filter by the right branch name, example: main -> release-2.9
+  sed -i -e "s/\"main\"/\"release-${version%.*}\"/g" .tekton/*
 
-    # The appstudio.openshift.io/application and appstudio.openshift.io/component labels in .tekton/ files must be adjusted to specify the right Application and Component respectively. Failing to do this will cause builds of the pipeline to be associated with the wrong application or component. example: forklift-operator-dev-preview -> forklift-operator-2-9
-    sed -i -e "s/dev-preview/$version_name/g" .tekton/*
+  # The appstudio.openshift.io/application and appstudio.openshift.io/component labels in .tekton/ files must be adjusted to specify the right Application and Component respectively. Failing to do this will cause builds of the pipeline to be associated with the wrong application or component. example: forklift-operator-dev-preview -> forklift-operator-2-9
+  sed -i -e "s/dev-preview/$version_name/g" .tekton/*
 
-    if [[ "$release_conf" == "forklift" ]]; then
-      sed -i -e "s/dev-preview/$version_name/g" build/forklift-operator-bundle/images.conf
-      git add build/forklift-operator-bundle/images.conf
-    fi
-    git add .tekton/ build/release.conf     
-    git commit -sm "Code freeze for ${version%.*}"
+  if [[ "$release_conf" == "forklift" ]]; then
+    sed -i -e "s/dev-preview/$version_name/g" build/forklift-operator-bundle/images.conf
+    git add build/forklift-operator-bundle/images.conf
+  fi
+  git add .tekton/ build/release.conf
+  git commit -sm "Code freeze for ${version%.*}"
 
-    read -p "Do you want to see what changes were made? (Y/N): " confirm 
-    if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-        git show $(git rev-parse HEAD)
-    fi
+  read -p "Do you want to see what changes were made? (Y/N): " confirm
+  if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
+    git show $(git rev-parse HEAD)
+  fi
 
-    echo "Will push the changes to your fork's CF-$version branch..."
-    read -p "Continue? (Y/N): " confirm 
-    if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-        git push fork CF-$version
-        echo "You can now create a PR from the 'CF-$version' into release-${version%.*} branch"
-    else
-        echo "Skipped push to remote repository, you can still push manually from working dir..."
-    fi
+  echo "Will push the changes to your fork's CF-$version branch..."
+  read -p "Continue? (Y/N): " confirm
+  if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
+    git push fork CF-$version
+    echo "You can now create a PR from the 'CF-$version' into release-${version%.*} branch"
+  else
+    echo "Skipped push to remote repository, you can still push manually from working dir..."
+  fi
 }
 
 mkdir tmp
@@ -187,52 +194,46 @@ read -p "Continue? (Y/N): " confirm && [[ $confirm == [yY] || $confirm == [yY][e
 version_name=${version/./-}
 version_name=${version_name%.*}
 
-
-
 ### MTV side ###
 
-read -p "Start branching of forklift? (Y/N): " confirm 
+read -p "Start branching of forklift? (Y/N): " confirm
 if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-    git clone $forklift_url
-    cd forklift
-    git remote add fork $fork_forklift_url
-    process_repo release_conf_forklift
-    cd ..
+  git clone $forklift_url
+  cd forklift
+  git remote add fork $fork_forklift_url
+  process_repo release_conf_forklift
+  cd ..
 fi
 
-read -p "Start branching of forklift-console-plugin? (Y/N): " confirm 
+read -p "Start branching of forklift-console-plugin? (Y/N): " confirm
 if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-    git clone $forklift_console_plugin_url
-    cd forklift-console-plugin
-    git remote add fork $fork_forklift_console_plugin_url
-    process_repo release_conf_console_plugin
-    cd ..
+  git clone $forklift_console_plugin_url
+  cd forklift-console-plugin
+  git remote add fork $fork_forklift_console_plugin_url
+  process_repo release_conf_console_plugin
+  cd ..
 fi
 
-read -p "Start branching of forklift-must-gather? (Y/N): " confirm 
+read -p "Start branching of forklift-must-gather? (Y/N): " confirm
 if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-    git clone $forklift_must_gather_url
-    cd forklift-must-gather
-    git remote add fork $fork_forklift_must_gather_url
-    process_repo release_conf_must_gather
-    cd ..
+  git clone $forklift_must_gather_url
+  cd forklift-must-gather
+  git remote add fork $fork_forklift_must_gather_url
+  process_repo release_conf_must_gather
+  cd ..
 fi
-
-
-
-
 
 ### Konflux side ###
 
-read -p "Start configuring konflux? (Y/N): " confirm 
+read -p "Start configuring konflux? (Y/N): " confirm
 if [[ $confirm != [yY] && $confirm != [yY][eE][sS] ]]; then
-    # Clean up
-    echo "Clean up (remove) working tmp dir ..."
-    read -p "Continue? (Y/N): " confirm
-    if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-        rm -rf $tmp_dir
-    fi
-    exit 0
+  # Clean up
+  echo "Clean up (remove) working tmp dir ..."
+  read -p "Continue? (Y/N): " confirm
+  if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
+    rm -rf $tmp_dir
+  fi
+  exit 0
 fi
 
 git clone $konflux_releng --depth=1
@@ -240,7 +241,7 @@ cd konflux-release-data
 git checkout -b mtv_add_stream
 
 # Add new version stream
-cat << EOF >> tenants-config/cluster/stone-prd-rh01/tenants/rh-mtv-1-tenant/streams.yaml
+cat <<EOF >>tenants-config/cluster/stone-prd-rh01/tenants/rh-mtv-1-tenant/streams.yaml
 ---
 apiVersion: projctl.konflux.dev/v1beta1
 kind: ProjectDevelopmentStream
@@ -260,35 +261,87 @@ spec:
         value: "release-${version%.*}"
 EOF
 
+cat <<EOF >>tenants-config/cluster/stone-prod-p02/tenants/rh-mtv-btrfs-tenant/streams.yaml
+---
+apiVersion: projctl.konflux.dev/v1beta1
+kind: ProjectDevelopmentStream
+metadata:
+  name: forklift-operator-int-pds-$version_name
+  namespace: rh-mtv-btrfs-tenant
+spec:
+  project: forklift-operator-int-project
+  template:
+    name: forklift-operator-int-template
+    values:
+      - name: versionName
+        value: "$version_name"
+      - name: revision
+        value: "release-${version%.*}"
+EOF
+
 # Go to our tenant
 cd config/stone-prd-rh01.pg1f.p1/product/ReleasePlanAdmission/rh-mtv-1
 
 # Update registry and replace dev-preview for version
 for i in forklift-operator-rpa-stage-dev-preview-*; do
-    cp "$i" "$(echo $i | sed "s/dev-preview/$version_name/")";
+  cp "$i" "$(echo $i | sed "s/dev-preview/$version_name/")"
 done
 sed -i -e "s/dev-preview/$version_name/g" forklift-operator-rpa-stage-$version_name-*
 sed -i -e "s/mtv-candidate/$registry/g" forklift-operator-rpa-stage-$version_name-*
 
 # Update registry and replace dev-preview for version
 for i in forklift-operator-rpa-prod-dev-preview-*; do
-    cp "$i" "$(echo $i | sed "s/dev-preview/$version_name/")";
+  cp "$i" "$(echo $i | sed "s/dev-preview/$version_name/")"
 done
 sed -i -e "s/dev-preview/$version_name/g" forklift-operator-rpa-prod-$version_name-*
 sed -i -e "s/mtv-candidate/$registry/g" forklift-operator-rpa-prod-$version_name-*
 
 # Update product_version in stage RPAs
 for i in forklift-operator-rpa-stage-$version_name-*; do
-    sed "/product_version/s/      product_version: \"[0-9].[0.9]\"/      product_version: \"${version%.*}\"/" $i > $i-replace
-    rm $i
-    mv $i-replace $i
+  sed "/product_version/s/      product_version: \"[0-9].[0.9]\"/      product_version: \"${version%.*}\"/" $i >$i-replace
+  rm $i
+  mv $i-replace $i
 done
 
 # Update product_version in prod RPAs
 for i in forklift-operator-rpa-prod-$version_name-*; do
-    sed "/product_version/s/      product_version: \"[0-9].[0.9]\"/      product_version: \"${version%.*}\"/" $i > $i-replace
-    rm $i
-    mv $i-replace $i
+  sed "/product_version/s/      product_version: \"[0-9].[0.9]\"/      product_version: \"${version%.*}\"/" $i >$i-replace
+  rm $i
+  mv $i-replace $i
+done
+
+# Return to the root of the repo
+cd $tmp_dir/konflux-release-data
+
+# Go to our tenant
+cd config/stone-prod-p02.hjvn.p1/product/ReleasePlanAdmission/rh-mtv-btrfs
+
+# Update registry and replace dev-preview for version
+for i in forklift-operator-int-rpa-stage-dev-preview-*; do
+  cp "$i" "$(echo $i | sed "s/dev-preview/$version_name/")"
+done
+sed -i -e "s/dev-preview/$version_name/g" forklift-operator-int-rpa-stage-$version_name-*
+sed -i -e "s/mtv-candidate/$registry/g" forklift-operator-int-rpa-stage-$version_name-*
+
+# Update registry and replace dev-preview for version
+for i in forklift-operator-int-rpa-prod-dev-preview-*; do
+  cp "$i" "$(echo $i | sed "s/dev-preview/$version_name/")"
+done
+sed -i -e "s/dev-preview/$version_name/g" forklift-operator-int-rpa-prod-$version_name-*
+sed -i -e "s/mtv-candidate/$registry/g" forklift-operator-int-rpa-prod-$version_name-*
+
+# Update product_version in stage RPAs
+for i in forklift-operator-int-rpa-stage-$version_name-*; do
+  sed "/product_version/s/      product_version: \"[0-9].[0.9]\"/      product_version: \"${version%.*}\"/" $i >$i-replace
+  rm $i
+  mv $i-replace $i
+done
+
+# Update product_version in prod RPAs
+for i in forklift-operator-int-rpa-prod-$version_name-*; do
+  sed "/product_version/s/      product_version: \"[0-9].[0.9]\"/      product_version: \"${version%.*}\"/" $i >$i-replace
+  rm $i
+  mv $i-replace $i
 done
 
 # Return to the root of the repo
@@ -297,39 +350,42 @@ cd $tmp_dir/konflux-release-data
 # Build MTV manifests
 tenants-config/build-single.sh rh-mtv-1
 
+# Build MTV manifests
+tenants-config/build-single.sh rh-mtv-btrfs
+
 # Run tests
 echo "Running tox tests. They are required to pass if you want to be able to merge anything into the konflux repo, but they take around 5 minutes to run."
-read -p "Do you want to run tox? (Y/N): " confirm 
+read -p "Do you want to run tox? (Y/N): " confirm
 if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-    tox
-    # Check if tests failed
-    if [[ $? != 0 ]]; then
-        echo "'tox' failed. Fix the issues and then create a PR manually.";
-        echo "You can find the repo and changes at: $(pwd)"
-        exit 1
-    fi
+  tox
+  # Check if tests failed
+  if [[ $? != 0 ]]; then
+    echo "'tox' failed. Fix the issues and then create a PR manually."
+    echo "You can find the repo and changes at: $(pwd)"
+    exit 1
+  fi
 fi
 
 git add config/ tenants-config/
 git commit -sm "MTV: Add new PDS for ${version%.*}"
 
-read -p "Do you want to see what changes were made? (Y/N): " confirm 
+read -p "Do you want to see what changes were made? (Y/N): " confirm
 if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-    git show $(git rev-parse HEAD)
+  git show $(git rev-parse HEAD)
 fi
 
 echo "Will push the changes to origin's 'mtv_add_stream' branch..."
 read -p "Continue? (Y/N): " confirm
 if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-    git push origin mtv_add_stream
-    echo "You can now create a PR from the 'mtv_add_stream' into main branch..."
+  git push origin mtv_add_stream
+  echo "You can now create a PR from the 'mtv_add_stream' into main branch..."
 else
-    echo "Skipped push to remote repository, you can still push manually from working dir..."
+  echo "Skipped push to remote repository, you can still push manually from working dir..."
 fi
 
 # Clean up
 echo "Removing working tmp dir ..."
 read -p "Continue? (Y/N): " confirm
 if [[ $confirm == [yY] || $confirm == [yY][eE][sS] ]]; then
-    rm -rf $tmp_dir
+  rm -rf $tmp_dir
 fi
