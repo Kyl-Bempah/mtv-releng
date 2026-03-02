@@ -5,6 +5,9 @@
 
 set -e
 
+# Directory containing this script (so paths work when run from any CWD)
+SCRIPT_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+
 # Source utility functions
 source scripts/util.sh
 
@@ -18,14 +21,14 @@ source scripts/util.sh
 : "${CONTAINERFILE_PATH:=build/forklift-operator-bundle/Containerfile-downstream}"
 
 # Target repository for PR creation
-: "${TARGET_REPO:=Kyl-Bempah/forklift}"
+: "${TARGET_REPO:=kubev2v/forklift}"
 
 # Extraction script paths
 : "${LATEST_SNAPSHOT_SCRIPT:=./scripts/latest_snapshot.sh}"
 : "${SNAPSHOT_CONTENT_SCRIPT:=./scripts/snapshot_content.sh}"
 
-# Component mapping configuration file
-: "${COMPONENT_MAPPINGS_FILE:=./scripts/component_mappings.conf}"
+# Component mapping configuration file (default: same directory as this script)
+: "${COMPONENT_MAPPINGS_FILE:=$SCRIPT_DIR/component_mappings.conf}"
 
 # ============================================================================
 
@@ -251,8 +254,13 @@ extract_sha_references() {
                 continue
             fi
             
-            # Map component name to SHA
-            sha_mapping=$(echo "$sha_mapping" | jq --arg name "$name" --arg sha "$sha" '. + {($name): $sha}')
+            # Use base component name as key so we only have one SHA per ARG.
+            # Otherwise multiple snapshot entries (e.g. forklift-controller-2-10 and
+            # forklift-controller) could both map to CONTROLLER_IMAGE and we'd process
+            # the same ARG twice, showing "up to date" then overwriting with the other SHA.
+            local base_name
+            base_name=$(get_base_component_name "$name")
+            sha_mapping=$(echo "$sha_mapping" | jq --arg name "$base_name" --arg sha "$sha" '. + {($name): $sha}')
         fi
     done
     
@@ -293,46 +301,66 @@ extract_sha_references() {
     echo "$sha_mapping"
 }
 
+# Function to get base component name (strip version suffix)
+# Must match the logic used in get_arg_name_for_component so ARG lookup works.
+get_base_component_name() {
+    local component="$1"
+    local base_component="$component"
+    # Remove numeric version suffixes (e.g., -2-10, -1.0.0)
+    base_component=$(echo "$base_component" | sed 's/-[0-9].*$//')
+    # Remove common non-numeric suffixes
+    base_component=$(echo "$base_component" | sed 's/-dev-preview$//; s/-rc[0-9]*$//; s/-alpha$//; s/-beta$//; s/-stable$//')
+    echo "$base_component"
+}
+
 # Function to get ARG name for a component
 get_arg_name_for_component() {
     local component="$1"
     local containerfile="$2"
     
     # Remove version suffix to get base component name
-    # Handle patterns like: -2-10, -dev-preview, -rc1, etc.
-    local base_component="$component"
-    # Remove numeric version suffixes (e.g., -2-10, -1.0.0)
-    base_component=$(echo "$base_component" | sed 's/-[0-9].*$//')
-    # Remove common non-numeric suffixes
-    base_component=$(echo "$base_component" | sed 's/-dev-preview$//; s/-rc[0-9]*$//; s/-alpha$//; s/-beta$//; s/-stable$//')
+    local base_component
+    base_component=$(get_base_component_name "$component")
     
     # Try to find mapping in configuration file
     if [ -f "$COMPONENT_MAPPINGS_FILE" ]; then
         local arg_name
-        arg_name=$(grep "^${base_component}=" "$COMPONENT_MAPPINGS_FILE" 2>/dev/null | cut -d'=' -f2)
+        arg_name=$(grep "^${base_component}=" "$COMPONENT_MAPPINGS_FILE" 2>/dev/null | cut -d'=' -f2 | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//')
         if [ -n "$arg_name" ]; then
-            # Check if the ARG exists in the containerfile
-            if grep -q "^ARG ${arg_name}=" "$containerfile" 2>/dev/null; then
+            # Check if the ARG exists in the containerfile (allow optional space before =)
+            if grep -qE "^ARG ${arg_name}[[:space:]]*=" "$containerfile" 2>/dev/null; then
                 echo "$arg_name"
                 return 0
             fi
         fi
     fi
     
-    # Fallback: try to find existing ARG that matches the component
+    # Fallback: try to find existing ARG that matches the component.
+    # Prefer the longest (most specific) match so e.g. "populator-controller" maps to
+    # POPULATOR_CONTROLLER_IMAGE, not CONTROLLER_IMAGE (both contain "controller").
     local existing_args
-    existing_args=$(grep "^ARG.*_IMAGE=" "$containerfile" | sed 's/^ARG \([^=]*\)=.*/\1/' || true)
+    existing_args=$(grep -E "^ARG[[:space:]]+[A-Za-z0-9_]+_IMAGE[[:space:]]*=" "$containerfile" 2>/dev/null | sed -E 's/^ARG[[:space:]]+([^=]+)=.*/\1/' | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true)
     
+    local best_arg=""
+    local best_pattern_len=0
     for arg in $existing_args; do
-        # Convert ARG name to component pattern
+        [ -z "$arg" ] && continue
+        # Convert ARG name to component pattern (e.g. UI_PLUGIN_IMAGE -> ui-plugin)
         local arg_pattern=$(echo "$arg" | sed 's/_IMAGE$//' | tr '_' '-' | tr '[:upper:]' '[:lower:]')
         
         # Check if component matches this ARG pattern
         if [[ "$base_component" == *"$arg_pattern"* ]] || [[ "$arg_pattern" == *"$base_component"* ]]; then
-            echo "$arg"
-            return 0
+            # Keep the longest matching pattern so populator-controller -> POPULATOR_CONTROLLER_IMAGE not CONTROLLER_IMAGE
+            if [ ${#arg_pattern} -gt "$best_pattern_len" ]; then
+                best_arg="$arg"
+                best_pattern_len=${#arg_pattern}
+            fi
         fi
     done
+    if [ -n "$best_arg" ]; then
+        echo "$best_arg"
+        return 0
+    fi
     
     # If no match found, return empty
     echo ""
@@ -451,14 +479,15 @@ update_containerfile_shas() {
     done
     
     # Check for ARG lines in Containerfile that don't have corresponding components in snapshot
-    # This helps detect removed components
+    # This helps detect removed components (use same pattern as get_arg_name_for_component fallback)
     local containerfile_args
-    containerfile_args=$(grep "^ARG.*_IMAGE=" "$containerfile" | sed 's/^ARG \([^=]*\)=.*/\1/' || true)
+    containerfile_args=$(grep -E "^ARG[[:space:]]+[A-Za-z0-9_]+_IMAGE[[:space:]]*=" "$containerfile" 2>/dev/null | sed -E 's/^ARG[[:space:]]+([^=]+)=.*/\1/' | tr -d '\r' | sed 's/^[[:space:]]*//;s/[[:space:]]*$//' || true)
     local snapshot_components
     snapshot_components=$(echo "$sha_mapping" | jq -r 'keys[]' 2>/dev/null || true)
     
     local orphaned_args=0
     for arg in $containerfile_args; do
+        [ -z "$arg" ] && continue
         local found=false
         for component in $snapshot_components; do
             local expected_arg
@@ -592,7 +621,7 @@ create_pr() {
     fi
     
     # Commit changes
-    if ! git commit -m "chore: update Containerfile-downstream SHA references from snapshot
+    if ! git commit -s -m "chore(automation): update Containerfile-downstream SHA references from snapshot
 
 - Updated SHA references for version $version
 - Generated from latest snapshot
