@@ -12,6 +12,13 @@ fi
 # Prevent multiple sourcing of readonly variables
 if [[ -z "${UTIL_SOURCED:-}" ]]; then
   export UTIL_SOURCED=1
+
+  # Ensure common tool locations are in PATH (script may run with minimal PATH in VM/cron/non-interactive)
+  for dir in /usr/local/bin "$HOME/bin" "$HOME/.local/bin"; do
+    if [[ -d "$dir" && ":$PATH:" != *":$dir:"* ]]; then
+      export PATH="$dir:$PATH"
+    fi
+  done
   
   # Constants
   export JENKINS_BASE_URL="https://jenkins-csb-mtv-qe-main.dno.corp.redhat.com"
@@ -522,7 +529,22 @@ function validate_tools {
     
     if [ ${#missing_tools[@]} -ne 0 ]; then
         log "ERROR: Missing required tools: ${missing_tools[*]}"
-        log "Please install the missing tools and try again."
+        log "Current PATH (when script ran): $PATH"
+        for tool in "${missing_tools[@]}"; do
+            found_in=""
+            for dir in $(echo "$PATH" | tr ':' ' '); do
+                [[ -z "$dir" ]] && continue
+                if [[ -x "$dir/$tool" ]]; then
+                    found_in="$dir/$tool"
+                    break
+                fi
+            done
+            if [[ -n "$found_in" ]]; then
+                log "  $tool: 'command -v' did not find it, but executable exists at $found_in (possible shell/alias or PATH timing issue)"
+            else
+                log "  $tool: not found in any PATH directory"
+            fi
+        done
         exit 1
     fi
 }
