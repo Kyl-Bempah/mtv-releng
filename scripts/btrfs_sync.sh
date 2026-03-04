@@ -94,4 +94,8 @@ fi
 log_info "Pushing to internal repository (branch: $GIT_BRANCH)"
 git push -f internal $GIT_BRANCH
 
+log_info "Removing temp dir: $tmp_dir"
+cd ~
+rm -rf $tmp_dir
+
 log_success "Sync completed successfully"
