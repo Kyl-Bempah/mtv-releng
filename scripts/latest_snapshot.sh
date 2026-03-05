@@ -14,4 +14,4 @@ if [[ -z $1 ]]; then
 fi
 
 
-oc get snapshots --sort-by='{.metadata.creationTimestamp}' -o custom-columns=NAME:.metadata.name | grep $version | tail -n 1
+oc get snapshots --sort-by='{.metadata.creationTimestamp}' -o custom-columns=NAME:.metadata.name | grep forklift-operator-$version | tail -n 1

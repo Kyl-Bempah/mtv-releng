@@ -17,7 +17,7 @@ if [[ -z $1 || -z $2 ]]; then
 fi
 
 if [[ -z $3 ]]; then
-    oc get releases --sort-by={.metadata.creationTimestamp} | grep Succeeded | tac | grep $version | grep rp-$target | awk '{print $1}' | head -n 1
+    oc get releases --sort-by={.metadata.creationTimestamp} | grep Succeeded | grep forklift-operator-$version | grep rp-$target | awk '{print $1}' | tail -n 1
 else
-    oc get releases --sort-by={.metadata.creationTimestamp} | grep Succeeded | tac | grep $version | grep rp-$target | grep '\-rhel'$rhel | awk '{print $1}' | head -n 1
+    oc get releases --sort-by={.metadata.creationTimestamp} | grep Succeeded | grep forklift-operator-$version | grep rp-$target | grep '\-rhel'$rhel | awk '{print $1}' | tail -n 1
 fi

@@ -24,7 +24,8 @@ source scripts/util.sh
 : "${TARGET_REPO:=kubev2v/forklift}"
 
 # Extraction script paths
-: "${LATEST_SNAPSHOT_SCRIPT:=./scripts/latest_snapshot.sh}"
+: "${LATEST_RELEASE_SCRIPT:=./scripts/latest_release.sh}"
+: "${SNAPSHOT_FROM_RELEASE_SCRIPT:=./scripts/snapshot_from_release.sh}"
 : "${SNAPSHOT_CONTENT_SCRIPT:=./scripts/snapshot_content.sh}"
 
 # Component mapping configuration file (default: same directory as this script)
@@ -59,8 +60,10 @@ get_latest_snapshot() {
     local version="$1"
     
     # Use the configured snapshot script
+    local latest_release
+    latest_release=$("$LATEST_RELEASE_SCRIPT" "$version" "stage" 2>/dev/null)
     local snapshot_name
-    snapshot_name=$("$LATEST_SNAPSHOT_SCRIPT" "$version" 2>/dev/null)
+    snapshot_name=$("$SNAPSHOT_FROM_RELEASE_SCRIPT" "$latest_release" 2>/dev/null)
     
     if [ -z "$snapshot_name" ]; then
         echo "ERROR: No snapshot found for version: $version" >&2
