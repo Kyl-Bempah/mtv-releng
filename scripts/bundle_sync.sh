@@ -43,6 +43,9 @@ usage() {
     echo "  target_branch - Target branch for PR (default: 'main')"
     echo "  dry_run       - Set to 'true' to only show what would be changed (default: 'true')"
     echo ""
+    echo "If an open PR already exists for the same version and target branch (same title),"
+    echo "the script will update that PR's branch instead of creating a new PR."
+    echo ""
     echo "Environment Variables:"
     echo "  TARGET_REPO              - Target repository for PR creation (default: 'kubev2v/forklift')"
     echo "  COMPONENT_MAPPINGS_FILE  - Component mapping configuration file (default: './scripts/component_mappings.conf')"
@@ -370,11 +373,13 @@ get_arg_name_for_component() {
 }
 
 # Function to update Containerfile-downstream files
+# If existing_branch (5th arg) is set and not dry_run, prepare_target_repo will checkout that branch
 update_containerfile_shas() {
     local sha_mapping="$1"
     local dry_run="$2"
     local target_branch="$3"
     local temp_dir="$4"
+    local existing_branch="${5:-}"
     
     local changes_made=false
     local updated_files=""
@@ -399,8 +404,8 @@ update_containerfile_shas() {
     else
         log "Updating Containerfile-downstream files with new SHA references" >&2
         
-        # Prepare target repository (clone and checkout)
-        prepare_target_repo "$target_branch" "$temp_dir"
+        # Prepare target repository (clone and checkout; use existing_branch if updating a PR)
+        prepare_target_repo "$target_branch" "$temp_dir" "$existing_branch"
         
         # Work with the cloned repository
         containerfile="${temp_dir}/${CONTAINERFILE_PATH}"
@@ -555,10 +560,51 @@ update_containerfile_shas() {
     return 0
 }
 
+# Function to find an existing open sync PR for this version and target branch
+# gh pr list returns newest first; we use the first (newest) match. Outputs head branch name to stdout if found. Returns 0 if found, 1 if none.
+find_existing_sync_pr() {
+    local version="$1"
+    local target_branch="$2"
+    local pr_list_json
+    local title_pattern="Containerfile-downstream SHA references for ${version}"
+
+    if ! pr_list_json=$(gh pr list --repo "$TARGET_REPO" --base "$target_branch" --state open --json number,headRefName,title --limit 50 2>/dev/null); then
+        return 1
+    fi
+
+    local count
+    count=$(echo "$pr_list_json" | jq 'length' 2>/dev/null || echo "0")
+    local match_branch=""
+    local match_count=0
+
+    for ((i=0; i<count; i++)); do
+        local title
+        title=$(echo "$pr_list_json" | jq -r ".[$i].title" 2>/dev/null)
+        if [[ "$title" == "$title_pattern" ]]; then
+            match_count=$((match_count + 1))
+            # First match is newest (gh pr list order); use it
+            if [ -z "$match_branch" ]; then
+                match_branch=$(echo "$pr_list_json" | jq -r ".[$i].headRefName" 2>/dev/null)
+            fi
+        fi
+    done
+
+    if [ "$match_count" -eq 0 ]; then
+        return 1
+    fi
+    if [ "$match_count" -gt 1 ]; then
+        log "Multiple open PRs with matching title; using the newest (branch: $match_branch)" >&2
+    fi
+    echo "$match_branch"
+    return 0
+}
+
 # Function to clone and prepare target repository
+# If existing_branch is set (third arg), checkout that branch and merge target_branch into it
 prepare_target_repo() {
     local target_branch="$1"
     local temp_dir="$2"
+    local existing_branch="${3:-}"
     
     log "Cloning target repository: $TARGET_REPO"
     cd "$temp_dir"
@@ -573,10 +619,22 @@ prepare_target_repo() {
     # Configure git to use GitHub CLI for authentication (suppress errors if helper doesn't exist)
     git config credential.helper 'gh auth git-credential' 2>/dev/null || true
     
-    log "Repository prepared successfully"
+    if [ -n "$existing_branch" ]; then
+        log "Found existing sync branch: $existing_branch; checking out and updating from $target_branch"
+        git fetch origin "$existing_branch"
+        git checkout "$existing_branch"
+        if ! git merge "origin/$target_branch" -m "Merge $target_branch into $existing_branch"; then
+            log_error "Failed to merge $target_branch into $existing_branch"
+            return 1
+        fi
+        log "Repository prepared on existing branch $existing_branch"
+    else
+        log "Repository prepared successfully"
+    fi
 }
 
-# Function to create PR
+# Function to create PR or update an existing sync PR
+# If existing_branch (7th arg) is set, push to that branch instead of creating a new PR
 create_pr() {
     local version="$1"
     local target_branch="$2"
@@ -584,22 +642,35 @@ create_pr() {
     local updated_files="$4"
     local temp_dir="$5"
     local snapshot_name="$6"
+    local existing_branch="${7:-}"
     
     if [ "$dry_run" = "true" ]; then
-        log "DRY RUN: Would create PR for version $version against branch $target_branch in repo $TARGET_REPO"
+        if [ -n "$existing_branch" ]; then
+            log "DRY RUN: Would update existing PR (branch $existing_branch) for version $version against branch $target_branch in repo $TARGET_REPO"
+        else
+            log "DRY RUN: Would create PR for version $version against branch $target_branch in repo $TARGET_REPO"
+        fi
         return 0
     fi
     
-    log "Creating PR for version $version against branch $target_branch in repo $TARGET_REPO"
+    if [ -n "$existing_branch" ]; then
+        log "Updating existing sync PR (branch $existing_branch) for version $version against branch $target_branch in repo $TARGET_REPO"
+    else
+        log "Creating PR for version $version against branch $target_branch in repo $TARGET_REPO"
+    fi
     
     # Change to the cloned repository directory
     cd "$temp_dir"
     
-    # Generate branch name
-    local branch_name="update-sha-refs-$(date +%Y%m%d-%H%M%S)"
-    
-    # Create and checkout new branch
-    git checkout -b "$branch_name"
+    local branch_name
+    if [ -n "$existing_branch" ]; then
+        branch_name="$existing_branch"
+        # Already on existing branch from prepare_target_repo
+    else
+        branch_name="update-sha-refs-$(date +%Y%m%d-%H%M%S)"
+        # Create and checkout new branch
+        git checkout -b "$branch_name"
+    fi
     
     # Add the updated files
     if [ -z "$updated_files" ]; then
@@ -643,9 +714,12 @@ create_pr() {
     
     log "Pushed branch $branch_name successfully"
     
-    # Create PR
-    local pr_title="chore: Update Containerfile-downstream SHA references for $version"
-    local pr_body="This PR updates the SHA references in Containerfile-downstream files based on the latest snapshot for version $version.
+    if [ -n "$existing_branch" ]; then
+        log_success "Existing PR updated successfully (branch $branch_name)"
+    else
+        # Create PR
+        local pr_title="chore: Update Containerfile-downstream SHA references for $version"
+        local pr_body="This PR updates the SHA references in Containerfile-downstream files based on the latest snapshot for version $version.
 
 ## Changes
 - Updated SHA references in all Containerfile-downstream files
@@ -654,17 +728,18 @@ create_pr() {
 ## Automated Update
 This PR was created automatically by the mtv-releng update script."
 
-    if ! gh pr create \
-        --repo "$TARGET_REPO" \
-        --title "$pr_title" \
-        --body "$pr_body" \
-        --base "$target_branch" \
-        --head "$branch_name"; then
-        log_error "Failed to create PR"
-        return 1
+        if ! gh pr create \
+            --repo "$TARGET_REPO" \
+            --title "$pr_title" \
+            --body "$pr_body" \
+            --base "$target_branch" \
+            --head "$branch_name"; then
+            log_error "Failed to create PR"
+            return 1
+        fi
+
+        log_success "PR created successfully"
     fi
-    
-    log_success "PR created successfully"
 }
 
 # Function to cleanup
@@ -757,7 +832,16 @@ main() {
     local sha_count=$(echo "$sha_mapping" | jq 'keys | length' 2>/dev/null || echo "0")
     log "Found $sha_count components with SHA references (bundle component excluded)"
     log "Proceeding to update Containerfile-downstream files..."
-    
+
+    # When not dry run, check for an existing sync PR so we can update it instead of opening a new one
+    local existing_sync_branch=""
+    if [ "$dry_run" = "false" ]; then
+        existing_sync_branch=$(find_existing_sync_pr "$version" "$target_branch") || true
+        if [ -n "$existing_sync_branch" ]; then
+            log "Found existing open sync PR for version $version → $target_branch (branch: $existing_sync_branch); will update it"
+        fi
+    fi
+
     # Update Containerfile-downstream files
     local updated_files
     local update_result
@@ -768,7 +852,7 @@ main() {
     local temp_stdout_file="/tmp/bundle_sync_stdout_$$"
     
     # Capture stdout (file paths) and stderr (logs) separately
-    update_containerfile_shas "$sha_mapping" "$dry_run" "$target_branch" "$TEMP_DIR" > "$temp_stdout_file" 2> "$temp_result_file"
+    update_containerfile_shas "$sha_mapping" "$dry_run" "$target_branch" "$TEMP_DIR" "$existing_sync_branch" > "$temp_stdout_file" 2> "$temp_result_file"
     update_result=$?
     
     # Display the log output
@@ -802,8 +886,8 @@ main() {
                 return 1
             fi
             log "Creating PR with updated files: $updated_files"
-            # Create PR (pass snapshot_name to avoid calling get_latest_snapshot again)
-            if ! create_pr "$version" "$target_branch" "$dry_run" "$updated_files" "$TEMP_DIR" "$snapshot_name"; then
+            # Create PR or update existing (pass snapshot_name and existing_sync_branch)
+            if ! create_pr "$version" "$target_branch" "$dry_run" "$updated_files" "$TEMP_DIR" "$snapshot_name" "$existing_sync_branch"; then
                 log_error "Failed to create PR"
                 return 1
             fi
