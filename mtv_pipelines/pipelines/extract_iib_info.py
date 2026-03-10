@@ -11,6 +11,8 @@ from semver.version import Version
 from tasks.extract_info import extract_info
 from tasks.get_mtv_versions import get_mtv_versions
 
+from mtv_pipelines.wrappers.skopeo import Skopeo
+
 DESCRIPTION = "Pipeline to extract info (bundle, commits...) from IIB"
 
 logger = logging.getLogger(__name__)
@@ -28,6 +30,18 @@ def arg_parse(arg_parser):
         help='MTV version, example: "2.10.5',
         required=True,
     )
+
+
+@task
+async def skopeo_login_task(
+    data: EmptyDTO, args: Namespace, tg: TaskGroup
+) -> EmptyDTO:
+    try:
+        Skopeo().auth()
+    except RuntimeError as e:
+        logger.error(f"Failed to login to registries: {e}")
+        raise e
+    return EmptyDTO()
 
 
 @task
