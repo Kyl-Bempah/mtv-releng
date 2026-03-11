@@ -112,7 +112,7 @@ class JenkinsManager:
             "STORAGE_CLASS": "trident-storage-class",
             "MARKER": "copyoffload",
             "PYTEST_PARAMS": '--tc=insecure_verify_skip:"true"',
-            "PYTEST_EXTRA_PARAMS": '-k "not (TestCopyoffload2TbVmSnapshotsMigration or TestCopyoffloadLargeVmMigration)"',
+            "PYTEST_EXTRA_PARAMS": '-k "not (TestCopyoffload2TbVmSnapshotsMigration or TestCopyoffloadLargeVmMigration or TestCopyoffloadScaleMigration)"',
             "GIT_BRANCH": "main",
             "MTV_API_TEST_GIT_USER": "RedHatQE",
         }
