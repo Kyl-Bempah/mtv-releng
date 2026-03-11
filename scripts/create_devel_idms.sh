@@ -55,6 +55,7 @@ spec:
     - mirrors:
         - registry.stage.redhat.io/${repo}/mtv-virt-v2v-rhel9
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/virt-v2v-${version}
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/virt-v2v-rhel9-${version}
       source: registry.redhat.io/${repo}/mtv-virt-v2v-rhel9
     - mirrors:
         - registry.stage.redhat.io/${repo}/mtv-populator-controller-rhel9

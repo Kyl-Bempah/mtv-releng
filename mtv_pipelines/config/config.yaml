@@ -154,7 +154,7 @@ cmp_mappings:
     origin: "forklift"
 
   mtv-virt-v2v-rhel9:
-    upstream: "virt-v2v"
+    upstream: "virt-v2v-rhel9"
     origin: "forklift"
 
   mtv-openstack-populator-rhel9:
