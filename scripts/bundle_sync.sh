@@ -566,7 +566,8 @@ find_existing_sync_pr() {
     local version="$1"
     local target_branch="$2"
     local pr_list_json
-    local title_pattern="Containerfile-downstream SHA references for ${version}"
+    # Use same title format as create_pr() so we actually find existing PRs
+    local title_pattern="chore(automation): Bundle SHA reference update for ${version}"
 
     if ! pr_list_json=$(gh pr list --repo "$TARGET_REPO" --base "$target_branch" --state open --json number,headRefName,title --limit 50 2>/dev/null); then
         return 1
@@ -718,7 +719,7 @@ create_pr() {
         log_success "Existing PR updated successfully (branch $branch_name)"
     else
         # Create PR
-        local pr_title="chore: Update Containerfile-downstream SHA references for $version"
+        local pr_title="chore(automation): Bundle SHA reference update for $version"
         local pr_body="This PR updates the SHA references in Containerfile-downstream files based on the latest snapshot for version $version.
 
 ## Changes
