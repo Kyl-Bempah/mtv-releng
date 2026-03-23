@@ -11,7 +11,7 @@ from utils import parse_version
 logger = logging.getLogger(__name__)
 
 
-async def process_fbc_repo(fbc_repo: FBCRepo, tg: TaskGroup):
+async def process_fbc_repo(fbc_repo: FBCRepo, tg: TaskGroup, branch: str = ""):
     bundle = fbc_repo.for_bundle
     logger.info(f"Looking for previous commit with {bundle.version}")
     commits = fbc_repo.git.log(config.get_iib_max_commits())
@@ -84,7 +84,10 @@ async def process_fbc_repo(fbc_repo: FBCRepo, tg: TaskGroup):
         )
         fbc_repo.current_iib = IIB(curr_iib_url, fbc_repo.current_iib_version)
 
-        fbc_repo.git.push(branch=str(bundle.version))
+        if not branch:
+            fbc_repo.git.push(branch=str(bundle.version))
+        else:
+            fbc_repo.git.push(branch=branch)
         return fbc_repo
     # Return None if no changes were made
     return None
