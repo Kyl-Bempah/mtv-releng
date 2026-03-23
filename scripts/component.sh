@@ -7,7 +7,7 @@ PROT="docker://"
 # Print Usage if component URL is missing
 if [[ -z $1 ]]; then
   echo "Usage: ./component.sh <url to component>, examples:"
-  echo "./component.sh quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-dev-preview/vsphere-xcopy-volume-populator-dev-preview@sha256:f075ac0c73cc466a84e840ca9ca3541565d2834c58d3915ff6696d761f8ea4ed"
+  echo "./component.sh quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-dev-preview/vsphere-copy-offload-populator-dev-preview@sha256:f075ac0c73cc466a84e840ca9ca3541565d2834c58d3915ff6696d761f8ea4ed"
   exit 0
 fi
 
