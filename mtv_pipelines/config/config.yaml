@@ -169,6 +169,10 @@ cmp_mappings:
     upstream: "ova-provider-server"
     origin: "forklift"
 
+  mtv-vsphere-copy-offload-populator-rhel9:
+    upstream: "vsphere-copy-offload-populator"
+    origin: "forklift"
+  
   mtv-vsphere-xcopy-volume-populator-rhel9:
     upstream: "vsphere-xcopy-volume-populator"
     origin: "forklift"

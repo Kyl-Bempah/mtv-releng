@@ -30,5 +30,6 @@ oc annotate components/ovirt-populator-$version build.appstudio.openshift.io/req
 oc annotate components/populator-controller-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/validation-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/virt-v2v-rhel9-$version build.appstudio.openshift.io/request=trigger-pac-build
+oc annotate components/vsphere-copy-offload-populator-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/vsphere-xcopy-volume-populator-$version build.appstudio.openshift.io/request=trigger-pac-build
 scripts/rebuild_btrfs.sh $version

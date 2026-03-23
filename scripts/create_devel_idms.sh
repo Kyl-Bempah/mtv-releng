@@ -74,6 +74,10 @@ spec:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/ova-provider-server-${version}
       source: registry.redhat.io/${repo}/mtv-ova-provider-server-rhel9
     - mirrors:
+        - registry.stage.redhat.io/${repo}/mtv-vsphere-copy-offload-populator-rhel9
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/vsphere-copy-offload-populator-${version}
+      source: registry.redhat.io/${repo}/mtv-vsphere-copy-offload-populator-rhel9
+    - mirrors:
         - registry.stage.redhat.io/${repo}/mtv-vsphere-xcopy-volume-populator-rhel9
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/vsphere-xcopy-volume-populator-${version}
       source: registry.redhat.io/${repo}/mtv-vsphere-xcopy-volume-populator-rhel9
@@ -125,6 +129,9 @@ spec:
     - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/ova-provider-server-${version}
       source: registry.stage.redhat.io/${repo}/mtv-ova-provider-server-rhel9
+    - mirrors:
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/vsphere-copy-offload-populator-${version}
+      source: registry.stage.redhat.io/${repo}/mtv-vsphere-copy-offload-populator-rhel9
     - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/vsphere-xcopy-volume-populator-${version}
       source: registry.stage.redhat.io/${repo}/mtv-vsphere-xcopy-volume-populator-rhel9
