@@ -18,7 +18,7 @@ class JenkinsAnalyzer:
     ) -> JenkinsJobAnalysisDTO:
         logger.info(f"Analyzing job result for {job_result.url}")
         resp = requests.post(
-            f"{config.get_jenkins_analyzer_url().rstrip("/")}/analyze?sync=true",
+            f"{config.get_jenkins_analyzer_url().rstrip("/")}/analyze",
             headers={"Content-Type": "application/json"},
             json={
                 "job_name": job_result.job.job_name,
@@ -51,7 +51,7 @@ class JenkinsAnalyzer:
             job_result=job_result,
             summary=data["summary"],
             child_jobs=children,
-            html_report_url=data["html_report_url"],
+            html_report_url=data["result_url"],
         )
 
     def _prepare_output_for_mrkdwn(self, output: dict):
