@@ -178,9 +178,10 @@ validate_components_in_quay() {
             continue
         fi
         
-        # Skip virt-v2v validation - it's fetched from a different location (virt-v2v-int)
-        if [[ "$name" == *"virt-v2v"* ]] && [[ "$name" != *"virt-v2v-int"* ]]; then
-            log "Skipping validation for $name (will be fetched from virt-v2v-int repository)" >&2
+        # Skip only legacy virt-v2v snapshot names (non-int, non-rhel9); those use the virt-v2v-int quay fallback.
+        # virt-v2v-int and virt-v2v-rhel9 are validated from their snapshot containerImage when present.
+        if [[ "$name" == *"virt-v2v"* ]] && [[ "$name" != *"virt-v2v-int"* ]] && [[ "$name" != *"virt-v2v-rhel9"* ]]; then
+            log "Skipping validation for $name (will use virt-v2v-int from quay instead)" >&2
             continue
         fi
         
@@ -239,8 +240,8 @@ extract_sha_references() {
         local name=$(echo "$snapshot_data" | jq -r ".[$i].name")
         local container_image=$(echo "$snapshot_data" | jq -r ".[$i].containerImage")
         
-        # Skip virt-v2v components - we'll get it from quay separately
-        if [[ "$name" == *"virt-v2v"* ]] && [[ "$name" != *"virt-v2v-int"* ]]; then
+        # Skip legacy virt-v2v-only snapshot rows; virt-v2v-int SHA comes from quay fallback unless int is in the snapshot.
+        if [[ "$name" == *"virt-v2v"* ]] && [[ "$name" != *"virt-v2v-int"* ]] && [[ "$name" != *"virt-v2v-rhel9"* ]]; then
             log "Skipping $name from snapshot (will fetch virt-v2v-int from quay instead)" >&2
             continue
         fi
@@ -270,8 +271,16 @@ extract_sha_references() {
         fi
     done
     
-    # Get virt-v2v-int SHA from quay (latest on-push tag)
-    if [ -n "$version" ]; then
+    # Get virt-v2v-int SHA from quay only when the snapshot does not already include virt-v2v-int
+    # (avoids duplicating VIRT_V2V_IMAGE and conflicting with the pinned snapshot SHA).
+    local snapshot_has_virt_v2v_int=false
+    if echo "$snapshot_data" | jq -e '.[] | select(.name | contains("virt-v2v-int"))' >/dev/null 2>&1; then
+        snapshot_has_virt_v2v_int=true
+    fi
+    
+    if [ -n "$version" ] && [ "$snapshot_has_virt_v2v_int" = true ]; then
+        log "Snapshot includes virt-v2v-int; skipping quay virt-v2v-int fetch (using snapshot SHA)" >&2
+    elif [ -n "$version" ]; then
         local virt_v2v_sha
         local virt_v2v_stdout="/tmp/virt_v2v_stdout_$$"
         local virt_v2v_stderr="/tmp/virt_v2v_stderr_$$"
