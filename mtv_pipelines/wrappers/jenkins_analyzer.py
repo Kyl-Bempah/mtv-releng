@@ -38,7 +38,7 @@ class JenkinsAnalyzer:
         self, data: dict, job_result: JenkinsJobResultDTO
     ) -> JenkinsJobAnalysisDTO:
         children = []
-        for child in data["child_job_analyses"]:
+        for child in data.get("child_job_analyses", []):
             children.append(
                 JenkinsChildJobAnalysisDTO(
                     job_name=child["job_name"],
