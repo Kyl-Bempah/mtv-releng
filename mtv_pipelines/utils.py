@@ -15,6 +15,16 @@ PRETTY_PRINT = "  "
 
 logger = logging.getLogger(__name__)
 
+_FBC_PROD_OCP_INFIX = re.compile(r"(forklift-fbc-prod-)v\d+")
+
+
+def iib_short_for_target_ocp(iib_short: str, ocp_version: str) -> str:
+    """Rewrite ``forklift-fbc-prod-v###`` to match *ocp_version*; keep tag/digest unchanged."""
+    stripped = ocp_version.lstrip("v")
+    compact = f"v{stripped.replace('.', '')}"
+    replaced, n = _FBC_PROD_OCP_INFIX.subn(rf"\g<1>{compact}", iib_short, count=1)
+    return replaced if n else iib_short
+
 
 def create_temp_dir(suffix: str = "") -> tempfile.TemporaryDirectory:
     if suffix:
