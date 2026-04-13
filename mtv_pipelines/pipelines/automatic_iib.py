@@ -520,10 +520,6 @@ async def extract_commit_diff(
             diff = get_commit_diff(pcommit.sha, commit, gr)
             results.append(RepoDiffDTO(repo=repo, diff=diff, version=version))
             break
-    for r in results:
-        print(r.repo)
-        for d in r.diff:
-            print(f"  {d.sha} {d.date}")
     return results
 
 
