@@ -131,4 +131,4 @@ def extract_jira_keys(text: str) -> list[str]:
         if key.upper().split("-")[0] in allowed_keys:
             keys.append(key.upper())
 
-    return keys
+    return list(set(keys))
