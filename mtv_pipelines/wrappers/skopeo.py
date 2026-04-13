@@ -40,9 +40,14 @@ class Skopeo:
         return PROTOCOL + url
 
     def inspect(self, img_url: str) -> dict:
-        self.cmd.append("inspect")
+        self.cmd.extend(
+            [
+                "inspect",
+                "--no-tags",
+                self.__prepare_url__(img_url),
+            ]
+        )
 
-        self.cmd.append(self.__prepare_url__(img_url))
         return json.loads(self.__exec__())
 
     def copy(self, img_url: str, target_path: str) -> None:
@@ -67,4 +72,3 @@ class Skopeo:
         s += f"-u ${REGISTRY_PROD_USER} -p ${REGISTRY_PROD_TOKEN}"
         self.cmd.append(s)
         self.__exec__()
-
