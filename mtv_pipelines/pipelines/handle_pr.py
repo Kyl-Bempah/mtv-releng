@@ -437,36 +437,68 @@ async def trigger_jenkins_jobs(
 
         job = await jm.trigger_release_gate(version, ocps[0], iib_short)
         if job:
+            job_url_coro = await jm.get_job_info(
+                job["job_name"], job["job_number"]
+            )
+            job_url = job_url_coro.get("url", "")
             results.append(
                 JenkinsJobDTO(
                     iib_version=iib_version,
                     job_name=job["job_name"],
                     build_number=job["job_number"],
                     ocp_version=ocps[0],
+                    job_url=job_url,
                 )
             )
         job = await jm.trigger_release_non_gate(version, ocps[1], iib_short)
         if job:
+            job_url_coro = await jm.get_job_info(
+                job["job_name"], job["job_number"]
+            )
+            job_url = job_url_coro.get("url", "")
             results.append(
                 JenkinsJobDTO(
                     iib_version=iib_version,
                     job_name=job["job_name"],
                     build_number=job["job_number"],
                     ocp_version=ocps[1],
+                    job_url=job_url,
                 )
             )
         # Limit to 2.11 on 4.20
         if "2.11" in version:
             job = await jm.trigger_storage_offload(version, iib_short)
             if job:
+                job_url_coro = await jm.get_job_info(
+                    job["job_name"], job["job_number"]
+                )
+                job_url = job_url_coro.get("url", "")
                 results.append(
                     JenkinsJobDTO(
                         iib_version=iib_version,
                         job_name=job["job_name"],
                         build_number=job["job_number"],
                         ocp_version="v4.20",
+                        job_url=job_url,
                     )
                 )
+
+        # Trigger UI testing on UI cluster for supported MTV versions
+        job = await jm.trigger_ui_testing(version, ocps, iib_short)
+        if job:
+            job_url_coro = await jm.get_job_info(
+                job["job_name"], job["job_number"]
+            )
+            job_url = job_url_coro.get("url", "")
+            results.append(
+                JenkinsJobDTO(
+                    iib_version=iib_version,
+                    job_name=job["job_name"],
+                    build_number=job["job_number"],
+                    ocp_version=job["target_ocp"],
+                    job_url=job_url,
+                )
+            )
     except requests.exceptions.ConnectionError as ex:
         logger.error("Couldn't trigger jenkins CI jobs due to network issues")
         logger.exception(ex)
