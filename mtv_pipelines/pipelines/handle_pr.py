@@ -624,19 +624,7 @@ async def send_slack_ci_msg(
         )
         return {}
 
-    ts_ver_map: dict[str, list[JenkinsJobAnalysisDTO]] = {}
-    jobs: list[JenkinsJobAnalysisDTO] = data.task_outputs[analyze_jobs.name]
-    timestamps: list[SlackBuildMessageTSDTO] = data.task_outputs[
-        send_slack_build_msg.name
-    ]
-    for job in jobs:
-        j_ver = job.job_result.job.iib_version
-        if not ts_ver_map.get(j_ver, []):
-            ts_ver_map[j_ver] = [job]
-
-    for ts in timestamps:
-        job_analyses = ts_ver_map.get(ts.iib_version, [])
-        if not job_analyses:
-            continue
-        s = Slack()
-        s.send_ci_status(jobs, ts)
+    jobs = data.task_outputs[analyze_jobs.name]
+    timestamp = data.task_outputs[send_slack_build_msg.name]
+    s = Slack()
+    s.send_ci_status(jobs, timestamp)
