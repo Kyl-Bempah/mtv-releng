@@ -32,6 +32,8 @@ from wrappers.jenkins import JenkinsManager
 from wrappers.jenkins_analyzer import JenkinsAnalyzer
 from wrappers.slack import Slack
 
+from mtv_pipelines.wrappers.skopeo import Skopeo
+
 DESCRIPTION = "Pipeline to process IIB from FBC PR"
 
 
@@ -67,6 +69,18 @@ def arg_parse(arg_parser):
         required=False,
         action="store_true",
     )
+
+
+@task
+async def skopeo_login_task(
+    data: EmptyDTO, args: Namespace, tg: TaskGroup
+) -> EmptyDTO:
+    try:
+        Skopeo().auth()
+    except RuntimeError as e:
+        logger.error(f"Failed to login to registries: {e}")
+        raise e
+    return EmptyDTO()
 
 
 @task

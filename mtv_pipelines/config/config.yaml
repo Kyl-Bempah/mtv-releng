@@ -19,7 +19,7 @@ cluster_mappings:
 
 # Cluster to OCP version mapping for UI tests
 ui_cluster_mapping:
-  "qemtv-09": "4.20"
+  "qemtv-09": "4.21"
 
 # Current MTV versions (not used for anything yet)
 versions:
