@@ -41,14 +41,21 @@ class JenkinsManager:
                 return int(build_number)
             await asyncio.sleep(interval)
 
-    # returns build info
+    # Get running job info
+    async def get_job_info(self, job_name: str, build_number: int) -> dict:
+        logger.info(f"Getting job info for {job_name}/{build_number}")
+        info = self.server.get_build_info(job_name, build_number)
+        logger.debug({"Job info": info})
+        return info
+
+    # Wait for build to finish
     async def wait_for_completion(
         self, job_name: str, build_number: int
     ) -> dict:
         logger.info(f"Waiting for build to finish {job_name}/{build_number}")
         interval = config.get_jenkins_wait_refresh_seconds()
         while True:
-            info = self.server.get_build_info(job_name, build_number)
+            info = await self.get_job_info(job_name, build_number)
             logger.info(
                 f"Build {job_name}/{build_number} is still in progress"
             )
@@ -173,6 +180,25 @@ class JenkinsManager:
         args["REMOTE_CLUSTER_NAME"] = cluster
         return args
 
+    def get_ui_testing_args(
+        self, mtv_version: str, iib: str, target_cluster: str
+    ):
+        return {
+            "BRANCH": "master",
+            "CLUSTER_NAME": target_cluster,
+            "DEPLOY_MTV": True,
+            "IIB_NO": iib,
+            "MTV_SOURCE": "KONFLUX",
+            "MTV_VERSION": mtv_version,
+            "RC": True,
+            "CLEAN_CATALOG": True,
+            "TEST_ARGS": "--grep=@downstream",
+            "UI_TEST_IMAGE": "quay.io/kubev2v/forklift-ui-tests:latest",
+            "VSPHERE_PROVIDER": "vsphere-8.0.1",
+            "AGENT_RESOURCES": "LARGE",
+            "UPLOAD_TO_RP": False,
+        }
+
     async def trigger_release_gate(
         self, mtv_version: str, ocp_version: str, iib: str
     ) -> dict:
@@ -232,5 +258,46 @@ class JenkinsManager:
         job_number = await self.run_job(job_name, ci_args)
         if job_number:
             return {"job_name": job_name, "job_number": job_number}
+        else:
+            return {}
+
+    async def trigger_ui_testing(
+        self, mtv_version: str, ocp_versions: list[str], iib: str
+    ):
+        cluster_mapping = config.get_ui_cluster_mapping()
+        if not cluster_mapping:
+            logger.error("Couldn't get UI cluster mapping")
+            return {}
+
+        mappings = cluster_mapping.items()
+        ocps = [ver.replace("v", "") for ver in ocp_versions]
+        target_cluster = ""
+        target_ocp = ""
+        for cluster_name, cluster_version in mappings:
+            if cluster_version in ocps:
+                target_cluster = cluster_name
+                target_ocp = cluster_version
+                break
+        if not target_cluster:
+            logger.warning(
+                f"MTV {mtv_version} does not have supported UI cluster in config, skipping tests."
+            )
+            return {}
+
+        ci_args = self.get_ui_testing_args(mtv_version, iib, target_cluster)
+        if not ci_args:
+            logger.warning(
+                f"Missing arguments, can't trigger a UI test job for {mtv_version} on {target_cluster}"
+            )
+            return {}
+
+        job_name = "dev-mtv-deploy-and-ui-tests"
+        job_number = await self.run_job(job_name, ci_args)
+        if job_number:
+            return {
+                "job_name": job_name,
+                "job_number": job_number,
+                "target_ocp": target_ocp,
+            }
         else:
             return {}

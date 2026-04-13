@@ -7,6 +7,7 @@ from auth.auth import SlackAuth
 from config import config
 from models.dto import (
     JenkinsJobAnalysisDTO,
+    JenkinsJobDTO,
     SlackBuildMessageDTO,
     SlackBuildMessageTSDTO,
 )
@@ -312,7 +313,7 @@ class Slack:
                     self.client.chat_delete(channel=self.channel, ts=ts)
             raise e
 
-        logger.info(f"Sent messages timestamps: {tses}")
+        logger.info({"Sent messages timestamps": f"{tses}"})
         return tses[0]
 
     def send_block(self, blocks: list, channel: str, ts: str = "") -> str:
@@ -411,4 +412,42 @@ class Slack:
             channel=self.channel,
             ts=timestamp.timestamp,
         )
-        print(ts)
+        logger.info({"CI status slack message TS": ts})
+
+    def send_triggered_jobs(
+        self,
+        jobs: list[JenkinsJobDTO],
+        timestamp: SlackBuildMessageTSDTO,
+    ):
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "Triggered CI jobs",
+                    "emoji": True,
+                },
+            },
+            {"type": "divider"},
+        ]
+
+        for job in jobs:
+            job_name = job.job_name
+            build_number = job.build_number
+            job_url = job.job_url
+            blocks.append(
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"<{job_url}|{job_name} #{build_number}>",
+                    },
+                }
+            )
+
+        ts = self.send_block(
+            blocks,
+            channel=self.channel,
+            ts=timestamp.timestamp,
+        )
+        logger.info({"Triggered CI jobs slack message TS": ts})

@@ -149,3 +149,7 @@ def get_slack_failure_mentions() -> list[str]:
 
 def get_db_path() -> str:
     return _parse_simple("db_path")
+
+
+def get_ui_cluster_mapping() -> dict:
+    return _parse_simple("ui_cluster_mapping")

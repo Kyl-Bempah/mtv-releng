@@ -594,29 +594,43 @@ async def trigger_jenkins_jobs(
 
             job = await jm.trigger_release_gate(version, ocps[0], iib_short)
             if job:
+                job_url_coro = await jm.get_job_info(
+                    job["job_name"], job["job_number"]
+                )
+                job_url = job_url_coro.get("url", "")
                 results.append(
                     JenkinsJobDTO(
                         iib_version=iib_version,
                         job_name=job["job_name"],
                         build_number=job["job_number"],
                         ocp_version=ocps[0],
+                        job_url=job_url,
                     )
                 )
             job = await jm.trigger_release_non_gate(
                 version, ocps[1], iib_short
             )
             if job:
+                job_url_coro = await jm.get_job_info(
+                    job["job_name"], job["job_number"]
+                )
+                job_url = job_url_coro.get("url", "")
                 results.append(
                     JenkinsJobDTO(
                         iib_version=iib_version,
                         job_name=job["job_name"],
                         build_number=job["job_number"],
                         ocp_version=ocps[1],
+                        job_url=job_url,
                     )
                 )
             # Limit to 2.11 on 4.20
             if "2.11" in version:
                 job = await jm.trigger_storage_offload(version, iib_short)
+                job_url_coro = await jm.get_job_info(
+                    job["job_name"], job["job_number"]
+                )
+                job_url = job_url_coro.get("url", "")
                 if job:
                     results.append(
                         JenkinsJobDTO(
@@ -624,13 +638,71 @@ async def trigger_jenkins_jobs(
                             job_name=job["job_name"],
                             build_number=job["job_number"],
                             ocp_version="v4.20",
+                            job_url=job_url,
                         )
                     )
+
+            # Trigger UI testing on UI cluster for supported MTV versions
+            job = await jm.trigger_ui_testing(version, ocps, iib_short)
+            if job:
+                job_url_coro = await jm.get_job_info(
+                    job["job_name"], job["job_number"]
+                )
+                job_url = job_url_coro.get("url", "")
+                results.append(
+                    JenkinsJobDTO(
+                        iib_version=iib_version,
+                        job_name=job["job_name"],
+                        build_number=job["job_number"],
+                        ocp_version=job["target_ocp"],
+                        job_url=job_url,
+                    )
+                )
     except requests.exceptions.ConnectionError as ex:
         logger.error("Couldn't trigger jenkins CI jobs due to network issues")
         logger.exception(ex)
         return []
     return results
+
+
+@task
+@depends_on(trigger_jenkins_jobs, send_slack_build_msg)
+async def send_triggered_jobs_slack_message(
+    data: CollectorDTO, args: Namespace, tg: TaskGroup
+) -> EmptyDTO:
+    if not data:
+        logger.warning(
+            f"Previous task didn't return any Jenkins jobs or slack build messages"
+        )
+        return EmptyDTO()
+
+    if not data.task_outputs.get(trigger_jenkins_jobs.name):
+        logger.warning(f"Previous task didn't return any Jenkins jobs")
+        return EmptyDTO()
+    if not data.task_outputs.get(send_slack_build_msg.name):
+        logger.warning(
+            f"Previous task didn't return any slack build message timestamps"
+        )
+        return EmptyDTO()
+
+    ts_ver_map: dict[str, list[JenkinsJobDTO]] = {}
+    jobs: list[JenkinsJobDTO] = data.task_outputs[trigger_jenkins_jobs.name]
+    timestamps: list[SlackBuildMessageTSDTO] = data.task_outputs[
+        send_slack_build_msg.name
+    ]
+    for job in jobs:
+        j_ver = job.iib_version
+        if not ts_ver_map.get(j_ver, []):
+            ts_ver_map[j_ver] = [job]
+
+    for ts in timestamps:
+        jobs = ts_ver_map.get(ts.iib_version, [])
+        if not jobs:
+            continue
+        s = Slack()
+        s.send_triggered_jobs(jobs, ts)
+
+    return EmptyDTO()
 
 
 @task
@@ -654,8 +726,9 @@ async def wait_for_jenkins_jobs(
     try:
         jm = JenkinsManager(config.get_jenkins_url())
         for job in data:
-            if "offload" in job.job_name:
-                continue
+            # Skip waiting for offload jobs
+            # if "offload" in job.job_name:
+            #     continue
             tasks.append(tg.create_task(wait(job)))
         for task in tasks:
             results.append(await task)
@@ -691,7 +764,9 @@ async def send_slack_ci_msg(
     data: CollectorDTO, args: Namespace, tg: TaskGroup
 ):
     if not data:
-        logger.warning(f"Previous task didn't return any Jenkins jobs")
+        logger.warning(
+            f"Previous task didn't return any Jenkins jobs or slack build messages"
+        )
         return []
 
     if not data.task_outputs.get(analyze_jobs.name):

@@ -170,6 +170,7 @@ class JenkinsJobDTO(BaseModel):
     job_name: str
     build_number: int
     ocp_version: str
+    job_url: str
 
 
 class JenkinsJobResultDTO(BaseModel):
