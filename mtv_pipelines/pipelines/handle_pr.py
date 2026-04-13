@@ -95,6 +95,8 @@ async def prepare_fbc_repo(
     fbc_repo.git.config("user.email", config.get_git_email())
     fbc_repo.git.config("user.name", config.get_git_name())
 
+    GHCLI(fbc_repo.tmp_dir.name).auth()
+
     # Download OPM tool, offload downloading to threads
     fbc_repo.download_opm()
 
@@ -392,24 +394,24 @@ async def extract_commit_diff(
 @depends_on(extract_commit_diff, process_pull_request)
 async def send_slack_build_msg(
     data: CollectorDTO, args: Namespace, tg: TaskGroup
-) -> dict[str, str]:
+) -> SlackBuildMessageTSDTO:
     if not data:
         logger.warning(f"Previous task didn't return any data")
-        return {}
+        return EmptyDTO()
 
     if not data.task_outputs.get(extract_commit_diff.name):
         logger.warning(f"Previous task didn't return any commit diff")
-        return {}
+        return EmptyDTO()
 
     if not data.task_outputs.get(process_pull_request.name):
         logger.warning(f"Previous task didn't return any FBC repos")
-        return {}
+        return EmptyDTO()
 
     if args.skip_slack:
         logger.info(
             "Skipping sending of slack message as --skip-slack arg was provided"
         )
-        return {}
+        return EmptyDTO()
 
     result = {}
     fbc_repo = data.task_outputs[process_pull_request.name]
@@ -417,8 +419,9 @@ async def send_slack_build_msg(
         fbc_repo, data.task_outputs[extract_commit_diff.name]
     )
     ts = Slack().send_build(b)
-    result[str(fbc_repo.current_iib_version)] = ts
-    return result
+    return SlackBuildMessageTSDTO(
+        iib_version=str(fbc_repo.current_iib_version), timestamp=ts
+    )
 
 
 @task
@@ -518,6 +521,34 @@ async def trigger_jenkins_jobs(
         logger.exception(ex)
         return []
     return results
+
+
+@task
+@depends_on(trigger_jenkins_jobs, send_slack_build_msg)
+async def send_triggered_jobs_slack_message(
+    data: CollectorDTO, args: Namespace, tg: TaskGroup
+) -> EmptyDTO:
+    if not data:
+        logger.warning(
+            f"Previous task didn't return any Jenkins jobs or slack build messages"
+        )
+        return EmptyDTO()
+
+    jobs = data.task_outputs.get(trigger_jenkins_jobs.name)
+    if not jobs:
+        logger.warning(f"Previous task didn't return any Jenkins jobs")
+        return EmptyDTO()
+    ts = data.task_outputs.get(send_slack_build_msg.name)
+    if not ts:
+        logger.warning(
+            f"Previous task didn't return any slack build message timestamps"
+        )
+        return EmptyDTO()
+
+    s = Slack()
+    s.send_triggered_jobs(jobs, ts.timestamp)
+
+    return EmptyDTO()
 
 
 @task
