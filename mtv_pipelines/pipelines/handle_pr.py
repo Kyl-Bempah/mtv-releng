@@ -546,7 +546,7 @@ async def send_triggered_jobs_slack_message(
         return EmptyDTO()
 
     s = Slack()
-    s.send_triggered_jobs(jobs, ts.timestamp)
+    s.send_triggered_jobs(jobs, ts)
 
     return EmptyDTO()
 
