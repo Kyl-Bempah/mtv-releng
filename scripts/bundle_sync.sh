@@ -44,7 +44,8 @@ usage() {
     echo "  dry_run       - Set to 'true' to only show what would be changed (default: 'true')"
     echo ""
     echo "If an open PR already exists for the same version and target branch (same title),"
-    echo "the script will update that PR's branch instead of creating a new PR."
+    echo "the script will rebase that PR's head branch onto the latest base, apply SHA updates,"
+    echo "then push (with --force-with-lease) instead of creating a new PR."
     echo ""
     echo "Environment Variables:"
     echo "  TARGET_REPO              - Target repository for PR creation (default: 'kubev2v/forklift')"
@@ -74,6 +75,61 @@ get_latest_snapshot() {
     fi
     
     echo "$snapshot_name"
+}
+
+# VIRT_V2V_IMAGE line must not match VIRT_V2V_IMAGE_RHEL9 (pattern stops before _RHEL9).
+has_arg_virt_v2v_main() { grep -qE '^ARG VIRT_V2V_IMAGE[[:space:]="]' "$1" 2>/dev/null; }
+has_arg_virt_v2v_rhel9() { grep -qE '^ARG VIRT_V2V_IMAGE_RHEL9[[:space:]="]' "$1" 2>/dev/null; }
+
+# One probe: arg count, flags, and single-slot int mapping key (empty if not exactly one ARG).
+# Prints: <count> <has_main> <has_rhel9> <single_slot_key_or_empty>
+probe_containerfile_virt_v2v() {
+    local f="$1" ver="$2"
+    local has_main=0 has_rhel9=0
+    has_arg_virt_v2v_main "$f" && has_main=1
+    has_arg_virt_v2v_rhel9 "$f" && has_rhel9=1
+    local n=$((has_main + has_rhel9)) sk=""
+    if [ "$n" -eq 1 ]; then
+        if [ "$has_main" -eq 1 ]; then sk="virt-v2v-${ver}"; else sk="virt-v2v-rhel9-${ver}"; fi
+    fi
+    echo "$n $has_main $has_rhel9 $sk"
+}
+
+# Shared rule for validate + extract: skip snapshot row when digest comes from virt-v2v-int instead.
+# Exit 0 = skip this row; exit 1 = handle normally (validate skopeo / use snapshot SHA).
+virt_v2v_should_skip_snapshot_row() {
+    local name="$1" arg_count="$2"
+    [[ "$name" == *"virt-v2v"* ]] && [[ "$name" != *"virt-v2v-int"* ]] || return 1
+    [ "${arg_count:-1}" -lt 2 ] && return 0
+    [[ "$name" != *"virt-v2v-rhel9"* ]] && return 0
+    return 1
+}
+
+# Echoes updated JSON on stdout (always). Optional 4th arg: log line before fetch.
+append_virt_v2v_int_sha_to_mapping() {
+    local version="$1" current_json="$2" map_key="$3"
+    local pre_log="${4:-}"
+    [ -n "$pre_log" ] && log "$pre_log" >&2
+    local virt_v2v_stdout="/tmp/virt_v2v_stdout_$$"
+    local virt_v2v_stderr="/tmp/virt_v2v_stderr_$$"
+    if get_latest_virt_v2v_int_sha "$version" > "$virt_v2v_stdout" 2> "$virt_v2v_stderr"; then
+        cat "$virt_v2v_stderr" >&2
+        local virt_v2v_sha
+        virt_v2v_sha=$(grep -v '^$' "$virt_v2v_stdout" 2>/dev/null | tail -1)
+        rm -f "$virt_v2v_stdout" "$virt_v2v_stderr"
+        if [ -z "$virt_v2v_sha" ]; then
+            log_warning "Failed to extract SHA from virt-v2v-int output" >&2
+            echo "$current_json"
+            return 0
+        fi
+        echo "$current_json" | jq --arg name "$map_key" --arg sha "$virt_v2v_sha" '. + {($name): $sha}'
+        log "Added virt-v2v-int SHA to mapping as: $map_key" >&2
+        return 0
+    fi
+    cat "$virt_v2v_stderr" >&2
+    rm -f "$virt_v2v_stdout" "$virt_v2v_stderr"
+    log_warning "Failed to get virt-v2v-int SHA from quay" >&2
+    echo "$current_json"
 }
 
 # Function to get the latest virt-v2v-int SHA from quay (latest on-push tag)
@@ -147,8 +203,12 @@ get_latest_virt_v2v_int_sha() {
 }
 
 # Function to validate that components from snapshot actually exist in quay
+# Second arg: number of virt-v2v-related ARG lines in Containerfile-downstream (0, 1, or 2).
+# Single-slot: skip snapshot virt-v2v rows (digest from virt-v2v-int). Dual-slot: validate only *virt-v2v-rhel9*
+# snapshot rows; skip plain *virt-v2v* rows (VIRT_V2V_IMAGE comes from virt-v2v-int quay, not snapshot).
 validate_components_in_quay() {
     local snapshot_data="$1"
+    local virt_v2v_arg_count="${2:-1}"
     
     if [ -z "$snapshot_data" ]; then
         log_error "No snapshot data provided for validation"
@@ -178,10 +238,16 @@ validate_components_in_quay() {
             continue
         fi
         
-        # Skip virt-v2v validation - it's fetched from a different location (virt-v2v-int)
         if [[ "$name" == *"virt-v2v"* ]] && [[ "$name" != *"virt-v2v-int"* ]]; then
-            log "Skipping validation for $name (will be fetched from virt-v2v-int repository)" >&2
-            continue
+            if virt_v2v_should_skip_snapshot_row "$name" "$virt_v2v_arg_count"; then
+                if [ "${virt_v2v_arg_count:-1}" -lt 2 ]; then
+                    log "Skipping validation for $name (single virt-v2v ARG in bundle; SHA will come from virt-v2v-int if used)" >&2
+                else
+                    log "Skipping validation for $name (VIRT_V2V_IMAGE digest comes from virt-v2v-int quay, not snapshot)" >&2
+                fi
+                continue
+            fi
+            log "Validating $name from snapshot (VIRT_V2V_IMAGE_RHEL9)" >&2
         fi
         
         # Use skopeo to check if the image exists
@@ -215,16 +281,35 @@ validate_components_in_quay() {
 }
 
 # Function to extract SHA references from snapshot using existing script
+# Third arg: target git branch (for probing Containerfile-downstream virt-v2v ARG count).
 extract_sha_references() {
     local snapshot_name="$1"
     local version="$2"
+    local target_branch="${3:-main}"
+    
+    local virt_v2v_arg_count=1
+    local virt_v2v_int_key="virt-v2v-${version}"
+    local has_main=0 has_rhel9=0
+    local cf_probe
+    cf_probe=$(mktemp)
+    local containerfile_probe_url="${CONTAINERFILE_BASE_URL}/${target_branch}/${CONTAINERFILE_PATH}"
+    if curl -s -f -o "$cf_probe" "$containerfile_probe_url"; then
+        read -r virt_v2v_arg_count has_main has_rhel9 virt_v2v_int_key <<< "$(probe_containerfile_virt_v2v "$cf_probe" "$version")"
+        if [ "$virt_v2v_arg_count" -eq 1 ] && [ -z "$virt_v2v_int_key" ]; then
+            virt_v2v_int_key="virt-v2v-${version}"
+        fi
+        log "Containerfile-downstream on $target_branch: $virt_v2v_arg_count virt-v2v ARG(s) (VIRT_V2V_IMAGE=$has_main, VIRT_V2V_IMAGE_RHEL9=$has_rhel9)" >&2
+    else
+        log_warning "Could not fetch $containerfile_probe_url to detect virt-v2v ARGs; assuming single ARG and virt-v2v-int fallback" >&2
+    fi
+    rm -f "$cf_probe"
     
     # Use the configured snapshot content script
     local snapshot_data
     snapshot_data=$("$SNAPSHOT_CONTENT_SCRIPT" "$snapshot_name" 2>/dev/null)
     
-    # Validate components exist in quay before processing
-    if ! validate_components_in_quay "$snapshot_data"; then
+    # Validate components exist in quay before processing (needs virt_v2v_arg_count from probe)
+    if ! validate_components_in_quay "$snapshot_data" "$virt_v2v_arg_count"; then
         log_error "Component validation failed. Aborting SHA reference extraction."
         return 1
     fi
@@ -239,10 +324,16 @@ extract_sha_references() {
         local name=$(echo "$snapshot_data" | jq -r ".[$i].name")
         local container_image=$(echo "$snapshot_data" | jq -r ".[$i].containerImage")
         
-        # Skip virt-v2v components - we'll get it from quay separately
         if [[ "$name" == *"virt-v2v"* ]] && [[ "$name" != *"virt-v2v-int"* ]]; then
-            log "Skipping $name from snapshot (will fetch virt-v2v-int from quay instead)" >&2
-            continue
+            if virt_v2v_should_skip_snapshot_row "$name" "$virt_v2v_arg_count"; then
+                if [ "$virt_v2v_arg_count" -lt 2 ]; then
+                    log "Skipping $name from snapshot (single virt-v2v ARG; using virt-v2v-int from quay for that slot)" >&2
+                else
+                    log "Skipping $name from snapshot (VIRT_V2V_IMAGE uses virt-v2v-int from quay; not in snapshot)" >&2
+                fi
+                continue
+            fi
+            log "Using snapshot SHA for $name (VIRT_V2V_IMAGE_RHEL9)" >&2
         fi
         
         # Extract SHA from container image using sed
@@ -270,38 +361,18 @@ extract_sha_references() {
         fi
     done
     
-    # Get virt-v2v-int SHA from quay (latest on-push tag)
-    if [ -n "$version" ]; then
-        local virt_v2v_sha
-        local virt_v2v_stdout="/tmp/virt_v2v_stdout_$$"
-        local virt_v2v_stderr="/tmp/virt_v2v_stderr_$$"
-        # Capture stdout (SHA) and stderr (logs) separately
-        # Redirect all log output to stderr by wrapping the function call
-        if get_latest_virt_v2v_int_sha "$version" > "$virt_v2v_stdout" 2> "$virt_v2v_stderr"; then
-            # Display logs to stderr
-            cat "$virt_v2v_stderr" >&2
-            # Get the SHA from stdout (should be just the SHA, no logs)
-            virt_v2v_sha=$(cat "$virt_v2v_stdout" 2>/dev/null | grep -v "^$" | tail -1)
-            rm -f "$virt_v2v_stdout" "$virt_v2v_stderr"
-            
-            if [ -z "$virt_v2v_sha" ]; then
-                log_warning "Failed to extract SHA from virt-v2v-int output" >&2
-            else
-                # Add virt-v2v to the mapping (using the name pattern that matches the component mapping)
-                # The component name in snapshot might be "virt-v2v-<version>" but we need to map it correctly
-                local virt_v2v_name="virt-v2v-${version}"
-                sha_mapping=$(echo "$sha_mapping" | jq --arg name "$virt_v2v_name" --arg sha "$virt_v2v_sha" '. + {($name): $sha}')
-                log "Added virt-v2v-int SHA to mapping as: $virt_v2v_name" >&2
-            fi
-        else
-            # Display error logs
-            cat "$virt_v2v_stderr" >&2
-            rm -f "$virt_v2v_stdout" "$virt_v2v_stderr"
-            log_warning "Failed to get virt-v2v-int SHA from quay" >&2
-            # Don't fail the entire process if virt-v2v-int fetch fails, but log a warning
-        fi
-    else
+    # virt-v2v-int: single-slot fills the only ARG; dual-slot fills VIRT_V2V_IMAGE (RHEL9 from snapshot above).
+    if [ -z "$version" ]; then
         log_warning "Version not provided, skipping virt-v2v-int SHA fetch" >&2
+    elif [ "$virt_v2v_arg_count" -eq 0 ]; then
+        log "No VIRT_V2V_IMAGE / VIRT_V2V_IMAGE_RHEL9 ARGs in probed Containerfile; skipping virt-v2v-int fetch" >&2
+    elif [ "$virt_v2v_arg_count" -eq 1 ]; then
+        sha_mapping=$(append_virt_v2v_int_sha_to_mapping "$version" "$sha_mapping" "$virt_v2v_int_key" "")
+    elif [ "$has_main" -eq 1 ]; then
+        sha_mapping=$(append_virt_v2v_int_sha_to_mapping "$version" "$sha_mapping" "virt-v2v-${version}" \
+            "Fetching virt-v2v-int for VIRT_V2V_IMAGE (internal build is not in the snapshot; RHEL9 digest comes from snapshot above)")
+    else
+        log "Skipping virt-v2v-int fetch (no VIRT_V2V_IMAGE ARG in probed Containerfile)" >&2
     fi
     
     echo "$sha_mapping"
@@ -374,6 +445,8 @@ get_arg_name_for_component() {
 
 # Function to update Containerfile-downstream files
 # If existing_branch (5th arg) is set and not dry_run, prepare_target_repo will checkout that branch
+# and rebase it onto the base branch. In dry_run, existing_branch selects which raw branch to fetch
+# for preview (PR head when updating an existing PR).
 update_containerfile_shas() {
     local sha_mapping="$1"
     local dry_run="$2"
@@ -386,14 +459,24 @@ update_containerfile_shas() {
     local containerfile=""
     
     if [ "$dry_run" = "true" ]; then
-        log "DRY RUN: Analyzing Containerfile-downstream files for SHA reference updates" >&2
+        local file_branch="$target_branch"
+        if [ -n "$existing_branch" ]; then
+            file_branch="$existing_branch"
+            log "DRY RUN: Open sync PR exists (head $existing_branch → base $target_branch)" >&2
+            log "DRY RUN: A live run would rebase $existing_branch onto origin/$target_branch, apply SHA edits below, commit, and git push --force-with-lease" >&2
+            log "DRY RUN: Preview fetches raw Containerfile from branch $file_branch (tip of PR head; may differ slightly from post-rebase file if the base branch changed this path)" >&2
+        else
+            log "DRY RUN: No matching open PR; a live run would branch from $target_branch, apply edits, push, and open a new PR" >&2
+            log "DRY RUN: Preview fetches raw Containerfile from branch $file_branch" >&2
+        fi
+        log "DRY RUN: Analyzing Containerfile-downstream for SHA reference updates (no repo clone, no writes)" >&2
         
-        # Download file directly for dry run
-        local containerfile_url="${CONTAINERFILE_BASE_URL}/${target_branch}/${CONTAINERFILE_PATH}"
+        # Download file directly for dry run (PR head when updating an existing PR, else base branch)
+        local containerfile_url="${CONTAINERFILE_BASE_URL}/${file_branch}/${CONTAINERFILE_PATH}"
         containerfile="/tmp/Containerfile-downstream-dry-run-$$"
         
-        if ! curl -s -o "$containerfile" "$containerfile_url"; then
-            log "ERROR: Failed to download Containerfile-downstream from GitHub branch: $target_branch" >&2
+        if ! curl -s -f -o "$containerfile" "$containerfile_url"; then
+            log "ERROR: Failed to download Containerfile-downstream from: $containerfile_url" >&2
             return 1
         fi
         if [ ! -f "$containerfile" ] || [ ! -s "$containerfile" ]; then
@@ -512,12 +595,22 @@ update_containerfile_shas() {
     done
     
     # Report component processing summary
-    log "Component processing summary:" >&2
+    local _p="" _u="Updated" _s="Skipped (up to date)" _m="Missing/Unknown" _o="Orphaned ARGs (removed components)"
+    if [ "$dry_run" = "true" ]; then
+        _p="DRY RUN: "
+        _u="Would update"
+        _s="Unchanged (SHA already latest)"
+        _m="Missing/unknown mapping"
+        _o="Orphaned ARGs (no snapshot component)"
+        log "${_p}Component processing summary (preview only):" >&2
+    else
+        log "Component processing summary:" >&2
+    fi
     log "  - Processed: $components_processed" >&2
-    log "  - Updated: $components_updated" >&2
-    log "  - Skipped (up to date): $components_skipped" >&2
-    log "  - Missing/Unknown: $components_missing" >&2
-    log "  - Orphaned ARGs (removed components): $orphaned_args" >&2
+    log "  - ${_u}: $components_updated" >&2
+    log "  - ${_s}: $components_skipped" >&2
+    log "  - ${_m}: $components_missing" >&2
+    log "  - ${_o}: $orphaned_args" >&2
     
     
     # Set changes_made based on whether any components were updated
@@ -533,6 +626,8 @@ update_containerfile_shas() {
         else
             log "DRY RUN: Would have updated Containerfile-downstream files" >&2
         fi
+        # Machine-readable for main() — stdout only; keeps dry-run PR preview accurate
+        echo "BUNDLE_SYNC_DRY_RUN_WOULD_UPDATE=$components_updated"
         return 0
     fi
     
@@ -573,24 +668,11 @@ find_existing_sync_pr() {
         return 1
     fi
 
-    local count
-    count=$(echo "$pr_list_json" | jq 'length' 2>/dev/null || echo "0")
-    local match_branch=""
-    local match_count=0
+    local match_branch match_count
+    match_branch=$(echo "$pr_list_json" | jq -r --arg t "$title_pattern" 'map(select(.title == $t)) | .[0].headRefName // empty' 2>/dev/null)
+    match_count=$(echo "$pr_list_json" | jq --arg t "$title_pattern" '[.[] | select(.title == $t)] | length' 2>/dev/null || echo "0")
 
-    for ((i=0; i<count; i++)); do
-        local title
-        title=$(echo "$pr_list_json" | jq -r ".[$i].title" 2>/dev/null)
-        if [[ "$title" == "$title_pattern" ]]; then
-            match_count=$((match_count + 1))
-            # First match is newest (gh pr list order); use it
-            if [ -z "$match_branch" ]; then
-                match_branch=$(echo "$pr_list_json" | jq -r ".[$i].headRefName" 2>/dev/null)
-            fi
-        fi
-    done
-
-    if [ "$match_count" -eq 0 ]; then
+    if [ -z "$match_branch" ] || [ "$match_branch" = "null" ]; then
         return 1
     fi
     if [ "$match_count" -gt 1 ]; then
@@ -601,7 +683,8 @@ find_existing_sync_pr() {
 }
 
 # Function to clone and prepare target repository
-# If existing_branch is set (third arg), checkout that branch and merge target_branch into it
+# If existing_branch is set (third arg), checkout that branch and rebase onto origin/target_branch
+# so the PR stays based on the latest base (avoids an outdated head effectively reverting base commits).
 prepare_target_repo() {
     local target_branch="$1"
     local temp_dir="$2"
@@ -621,16 +704,17 @@ prepare_target_repo() {
     git config credential.helper 'gh auth git-credential' 2>/dev/null || true
     
     if [ -n "$existing_branch" ]; then
-        log "Found existing sync branch: $existing_branch; checking out and updating from $target_branch"
+        log "Checking out existing sync branch: $existing_branch"
         git fetch origin "$existing_branch"
         git checkout "$existing_branch"
-        if ! git merge "origin/$target_branch" -m "Merge $target_branch into $existing_branch"; then
-            log_error "Failed to merge $target_branch into $existing_branch"
+        log "Rebasing $existing_branch onto origin/$target_branch (latest base)"
+        if ! git rebase "origin/$target_branch"; then
+            log_error "Failed to rebase $existing_branch onto origin/$target_branch. Resolve the conflict locally on that branch, or merge base into the branch, then re-run."
             return 1
         fi
-        log "Repository prepared on existing branch $existing_branch"
+        log_success "Rebased $existing_branch onto latest $target_branch; ready to apply SHA updates"
     else
-        log "Repository prepared successfully"
+        log "Repository prepared on $target_branch (no existing sync PR branch to rebase)"
     fi
 }
 
@@ -647,17 +731,17 @@ create_pr() {
     
     if [ "$dry_run" = "true" ]; then
         if [ -n "$existing_branch" ]; then
-            log "DRY RUN: Would update existing PR (branch $existing_branch) for version $version against branch $target_branch in repo $TARGET_REPO"
+            log "DRY RUN: Would git add/commit on $existing_branch, git push --force-with-lease, and refresh existing PR (base $target_branch) for version $version in $TARGET_REPO"
         else
-            log "DRY RUN: Would create PR for version $version against branch $target_branch in repo $TARGET_REPO"
+            log "DRY RUN: Would git add/commit, git push, and gh pr create --base $target_branch for version $version in $TARGET_REPO"
         fi
         return 0
     fi
     
     if [ -n "$existing_branch" ]; then
-        log "Updating existing sync PR (branch $existing_branch) for version $version against branch $target_branch in repo $TARGET_REPO"
+        log "Committing and pushing rebased branch $existing_branch to update open PR (base $target_branch, version $version, repo $TARGET_REPO)"
     else
-        log "Creating PR for version $version against branch $target_branch in repo $TARGET_REPO"
+        log "Creating new branch, commit, push, and PR for version $version (base $target_branch, repo $TARGET_REPO)"
     fi
     
     # Change to the cloned repository directory
@@ -707,16 +791,23 @@ create_pr() {
     
     log "Committed changes successfully"
     
-    # Push branch
-    if ! git push origin "$branch_name"; then
-        log_error "Failed to push branch $branch_name"
-        return 1
+    # Push branch (rebase rewrites history on the PR head; use force-with-lease only in that case)
+    if [ -n "$existing_branch" ]; then
+        if ! git push --force-with-lease origin "$branch_name"; then
+            log_error "Failed to push branch $branch_name with --force-with-lease (needed after rebase)"
+            return 1
+        fi
+        log "Pushed $branch_name with --force-with-lease (rebased onto base)"
+    else
+        if ! git push origin "$branch_name"; then
+            log_error "Failed to push branch $branch_name"
+            return 1
+        fi
+        log "Pushed branch $branch_name successfully"
     fi
     
-    log "Pushed branch $branch_name successfully"
-    
     if [ -n "$existing_branch" ]; then
-        log_success "Existing PR updated successfully (branch $branch_name)"
+        log_success "Open PR updated successfully (branch $branch_name pushed after rebase)"
     else
         # Create PR
         local pr_title="chore(automation): Bundle SHA reference update for $version"
@@ -790,17 +881,13 @@ main() {
     local temp_sha_stdout="/tmp/bundle_sync_sha_stdout_$$"
     local temp_sha_stderr="/tmp/bundle_sync_sha_stderr_$$"
     local sha_mapping
-    local extract_result
     
-    if ! extract_sha_references "$snapshot_name" "$version" > "$temp_sha_stdout" 2> "$temp_sha_stderr"; then
-        extract_result=$?
-        # Display log output
+    if ! extract_sha_references "$snapshot_name" "$version" "$target_branch" > "$temp_sha_stdout" 2> "$temp_sha_stderr"; then
         cat "$temp_sha_stderr" >&2
         log_error "Failed to extract SHA references. Component validation may have failed."
         rm -f "$temp_sha_stdout" "$temp_sha_stderr"
         return 1
     fi
-    extract_result=$?
     
     # Display log output
     cat "$temp_sha_stderr" >&2
@@ -808,11 +895,6 @@ main() {
     # Get the JSON from stdout - read entire content, jq can handle multi-line JSON
     sha_mapping=$(cat "$temp_sha_stdout" 2>/dev/null)
     rm -f "$temp_sha_stdout" "$temp_sha_stderr"
-    
-    if [ $extract_result -ne 0 ]; then
-        log_error "Failed to extract SHA references"
-        return 1
-    fi
     
     if [ -z "$sha_mapping" ]; then
         log_error "SHA mapping is empty"
@@ -832,15 +914,28 @@ main() {
     # Log the results
     local sha_count=$(echo "$sha_mapping" | jq 'keys | length' 2>/dev/null || echo "0")
     log "Found $sha_count components with SHA references (bundle component excluded)"
-    log "Proceeding to update Containerfile-downstream files..."
 
-    # When not dry run, check for an existing sync PR so we can update it instead of opening a new one
+    # Find an existing sync PR for both dry-run and live (dry-run uses it for accurate preview + messages)
     local existing_sync_branch=""
-    if [ "$dry_run" = "false" ]; then
-        existing_sync_branch=$(find_existing_sync_pr "$version" "$target_branch") || true
-        if [ -n "$existing_sync_branch" ]; then
-            log "Found existing open sync PR for version $version → $target_branch (branch: $existing_sync_branch); will update it"
+    existing_sync_branch=$(find_existing_sync_pr "$version" "$target_branch") || true
+    if [ -n "$existing_sync_branch" ]; then
+        if [ "$dry_run" = "true" ]; then
+            log "Found existing open sync PR (head $existing_sync_branch → base $target_branch); live run would rebase that head onto the latest base before editing"
+        else
+            log "Found existing open sync PR (head $existing_sync_branch → base $target_branch); rebasing head onto latest base, then applying SHA updates"
         fi
+    else
+        if [ "$dry_run" = "true" ]; then
+            log "No existing open sync PR with matching title; live run would branch from $target_branch and open a new PR if Containerfile changes are needed"
+        else
+            log "No existing open sync PR with matching title; will create a new branch and PR if Containerfile changes are needed"
+        fi
+    fi
+
+    if [ "$dry_run" = "true" ]; then
+        log "Proceeding to dry-run preview of Containerfile-downstream SHA updates (raw file via curl; no clone)"
+    else
+        log "Proceeding to clone, rebase existing PR branch if present, and apply Containerfile-downstream SHA updates"
     fi
 
     # Update Containerfile-downstream files
@@ -852,18 +947,27 @@ main() {
     local temp_result_file="/tmp/bundle_sync_result_$$"
     local temp_stdout_file="/tmp/bundle_sync_stdout_$$"
     
-    # Capture stdout (file paths) and stderr (logs) separately
+    # Capture stdout (file paths) and stderr (logs) separately.
+    # Non-zero exit is normal when SHAs already match (return 1); set -e must not abort before we replay logs and branch on $update_result.
+    set +e
     update_containerfile_shas "$sha_mapping" "$dry_run" "$target_branch" "$TEMP_DIR" "$existing_sync_branch" > "$temp_stdout_file" 2> "$temp_result_file"
     update_result=$?
+    set -e
     
-    # Display the log output
-    cat "$temp_result_file"
+    # Replay captured function logs on stderr so timestamped log wrappers and tee -a file 2>&1 behave consistently
+    if [ -s "$temp_result_file" ]; then
+        cat "$temp_result_file" >&2
+    fi
     
-    # The function outputs the file path to stdout, but we know it should be CONTAINERFILE_PATH
+    local dry_run_would_update=""
+    dry_run_would_update=$(grep '^BUNDLE_SYNC_DRY_RUN_WOULD_UPDATE=' "$temp_stdout_file" 2>/dev/null | tail -1 | cut -d= -f2)
+    
+    # The function outputs the file path to stdout (non-dry-run), but we know it should be CONTAINERFILE_PATH
     # If the update was successful, use the known path (simpler and more reliable)
     if [ $update_result -eq 0 ]; then
-        # Check if there's a valid path in stdout, otherwise use the default
-        local extracted_path=$(cat "$temp_stdout_file" 2>/dev/null | grep -E "^[a-zA-Z0-9_/.-]+$" | grep -F "$CONTAINERFILE_PATH" | head -1 || true)
+        # Check if there's a valid path in stdout, otherwise use the default (ignore machine-readable dry-run lines)
+        local extracted_path
+        extracted_path=$(grep -v '^BUNDLE_SYNC_' "$temp_stdout_file" 2>/dev/null | grep -E "^[a-zA-Z0-9_/.-]+$" | grep -F "$CONTAINERFILE_PATH" | head -1 || true)
         if [ -n "$extracted_path" ] && [[ "$extracted_path" == "$CONTAINERFILE_PATH" ]]; then
             updated_files="$extracted_path"
         else
@@ -874,34 +978,43 @@ main() {
     
     rm -f "$temp_result_file" "$temp_stdout_file"
     
-    log "Update result: $update_result"
-    log "Updated files: '$updated_files'"
-    log "Dry run: $dry_run"
-    
-    if [ $update_result -eq 0 ]; then
-        log "Update function returned success (0)"
-        if [ "$dry_run" = "false" ]; then
-            log "Dry run is false, proceeding with PR creation"
-            if [ -z "$updated_files" ]; then
-                log_error "No updated files found, cannot create PR"
-                return 1
-            fi
-            log "Creating PR with updated files: $updated_files"
-            # Create PR or update existing (pass snapshot_name and existing_sync_branch)
-            if ! create_pr "$version" "$target_branch" "$dry_run" "$updated_files" "$TEMP_DIR" "$snapshot_name" "$existing_sync_branch"; then
-                log_error "Failed to create PR"
-                return 1
-            fi
-        else
-            log "Dry run is true, skipping PR creation"
-            log "Dry run completed - no changes made"
+    if [ "$dry_run" = "true" ]; then
+        log "DRY RUN: update_containerfile_shas exit code: $update_result"
+        if [ -n "$updated_files" ]; then
+            log "DRY RUN: Relative path(s) that a live run would modify in the repo: $updated_files"
         fi
     else
-        log "Update function returned failure ($update_result)"
-        if [ "$dry_run" = "true" ]; then
-            log "Dry run completed - no changes needed"
+        log "update_containerfile_shas exit code: $update_result"
+        log "Paths written in clone when updates applied: '$updated_files'"
+    fi
+    
+    if [ $update_result -eq 0 ]; then
+        if [ "$dry_run" = "false" ]; then
+            if [ -z "$updated_files" ]; then
+                log_error "No updated files path resolved; cannot create or update PR"
+                return 1
+            fi
+            log "Applying changes: git commit and push (and gh pr create or update PR for): $updated_files"
+            if ! create_pr "$version" "$target_branch" "$dry_run" "$updated_files" "$TEMP_DIR" "$snapshot_name" "$existing_sync_branch"; then
+                log_error "Failed to create or update PR"
+                return 1
+            fi
         else
-            log "No changes needed - update function returned non-zero exit code"
+            if [ "${dry_run_would_update:-}" = "0" ]; then
+                log "DRY RUN: Skipping git commit/push preview (no ARG lines would change; already matches snapshot)"
+            elif [ -n "$updated_files" ]; then
+                if ! create_pr "$version" "$target_branch" "$dry_run" "$updated_files" "$TEMP_DIR" "$snapshot_name" "$existing_sync_branch"; then
+                    log_error "DRY RUN: unexpected failure from create_pr preview"
+                    return 1
+                fi
+            fi
+            log "DRY RUN: Preview finished (Containerfile preview via curl; gh pr list used for existing PR detection; no git write operations)"
+        fi
+    else
+        if [ "$dry_run" = "true" ]; then
+            log "DRY RUN: update_containerfile_shas reported an error (see messages above)"
+        else
+            log "Skipping commit and PR (update_containerfile_shas exited $update_result; usually means SHAs already match the snapshot, or a prior step failed—see logs above)"
         fi
     fi
     
