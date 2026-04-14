@@ -690,6 +690,10 @@ async def send_triggered_jobs_slack_message(
         j_ver = job.iib_version
         if not ts_ver_map.get(j_ver, []):
             ts_ver_map[j_ver] = [job]
+        else:
+            ts_ver_map[j_ver].append(job)
+
+    logger.info({"Sending triggered CI jobs": jobs})
 
     for ts in timestamps:
         jobs = ts_ver_map.get(ts.iib_version, [])
@@ -790,6 +794,10 @@ async def send_slack_ci_msg(
         j_ver = job.job_result.job.iib_version
         if not ts_ver_map.get(j_ver, []):
             ts_ver_map[j_ver] = [job]
+        else:
+            ts_ver_map[j_ver].append(job)
+
+    logger.info({"Sending CI status for jobs analysis": jobs})
 
     for ts in timestamps:
         job_analyses = ts_ver_map.get(ts.iib_version, [])
