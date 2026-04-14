@@ -201,6 +201,6 @@ cmp_mappings:
     upstream: "virt-v2v"
     origin: "forklift" # use public git because internal breaks auth
 
-  mtv-hyperv-server-provider-rhel9:
+  mtv-hyperv-provider-server-rhel9:
     upstream: "hyperv-provider-server"
     origin: "forklift"
