@@ -55,6 +55,9 @@ usage() {
     echo "  $0 2-10"
     echo "  $0 dev-preview release-2.10"
     echo "  $0 2-10 main true"
+    echo ""
+    echo "Logging: to capture a full transcript in one file, merge stderr (errors, skopeo, etc.):"
+    echo "  $0 dev-preview main true >>bundle.log 2>&1"
     exit 1
 }
 
@@ -683,8 +686,8 @@ find_existing_sync_pr() {
 }
 
 # Function to clone and prepare target repository
-# If existing_branch is set (third arg), checkout that branch and rebase onto origin/target_branch
-# so the PR stays based on the latest base (avoids an outdated head effectively reverting base commits).
+# If existing_branch is set (third arg), checkout that branch and rebase onto origin/target_branch.
+# If rebase hits conflicts: git rebase --abort, then git merge origin/<base> (sets BUNDLE_SYNC_EXISTING_BRANCH_PUSH_MODE=merge for a non-force push).
 prepare_target_repo() {
     local target_branch="$1"
     local temp_dir="$2"
@@ -709,10 +712,22 @@ prepare_target_repo() {
         git checkout "$existing_branch"
         log "Rebasing $existing_branch onto origin/$target_branch (latest base)"
         if ! git rebase "origin/$target_branch"; then
-            log_error "Failed to rebase $existing_branch onto origin/$target_branch. Resolve the conflict locally on that branch, or merge base into the branch, then re-run."
-            return 1
+            log_warning "Rebase stopped (conflicts or merge-binary issues). Aborting rebase and merging origin/$target_branch instead."
+            if ! git rebase --abort; then
+                log_error "Could not git rebase --abort; fix the clone under $temp_dir manually and re-run."
+                return 1
+            fi
+            if ! git merge "origin/$target_branch" -m "Merge $target_branch into $existing_branch (bundle_sync: rebase had conflicts)"; then
+                log_error "Merge of origin/$target_branch also failed (conflicts). Resolve on branch $existing_branch locally, push, then re-run this script."
+                git merge --abort 2>/dev/null || true
+                return 1
+            fi
+            export BUNDLE_SYNC_EXISTING_BRANCH_PUSH_MODE=merge
+            log_success "Merged origin/$target_branch into $existing_branch; ready to apply SHA updates (use regular push, not force)"
+        else
+            export BUNDLE_SYNC_EXISTING_BRANCH_PUSH_MODE=rebase
+            log_success "Rebased $existing_branch onto latest $target_branch; ready to apply SHA updates"
         fi
-        log_success "Rebased $existing_branch onto latest $target_branch; ready to apply SHA updates"
     else
         log "Repository prepared on $target_branch (no existing sync PR branch to rebase)"
     fi
@@ -731,7 +746,7 @@ create_pr() {
     
     if [ "$dry_run" = "true" ]; then
         if [ -n "$existing_branch" ]; then
-            log "DRY RUN: Would git add/commit on $existing_branch, git push --force-with-lease, and refresh existing PR (base $target_branch) for version $version in $TARGET_REPO"
+            log "DRY RUN: Would git add/commit on $existing_branch, push (--force-with-lease after rebase, or plain push after merge fallback), and refresh existing PR (base $target_branch) for version $version in $TARGET_REPO"
         else
             log "DRY RUN: Would git add/commit, git push, and gh pr create --base $target_branch for version $version in $TARGET_REPO"
         fi
@@ -791,13 +806,21 @@ create_pr() {
     
     log "Committed changes successfully"
     
-    # Push branch (rebase rewrites history on the PR head; use force-with-lease only in that case)
+    # After rebase: history rewritten → --force-with-lease. After merge fallback: linear merge commit → plain push.
     if [ -n "$existing_branch" ]; then
-        if ! git push --force-with-lease origin "$branch_name"; then
-            log_error "Failed to push branch $branch_name with --force-with-lease (needed after rebase)"
-            return 1
+        if [ "${BUNDLE_SYNC_EXISTING_BRANCH_PUSH_MODE:-rebase}" = "merge" ]; then
+            if ! git push origin "$branch_name"; then
+                log_error "Failed to push branch $branch_name (merge path; no force push)"
+                return 1
+            fi
+            log "Pushed $branch_name (merged base into PR branch; no force needed)"
+        else
+            if ! git push --force-with-lease origin "$branch_name"; then
+                log_error "Failed to push branch $branch_name with --force-with-lease (needed after rebase)"
+                return 1
+            fi
+            log "Pushed $branch_name with --force-with-lease (rebased onto base)"
         fi
-        log "Pushed $branch_name with --force-with-lease (rebased onto base)"
     else
         if ! git push origin "$branch_name"; then
             log_error "Failed to push branch $branch_name"
@@ -807,7 +830,7 @@ create_pr() {
     fi
     
     if [ -n "$existing_branch" ]; then
-        log_success "Open PR updated successfully (branch $branch_name pushed after rebase)"
+        log_success "Open PR updated successfully (branch $branch_name pushed)"
     else
         # Create PR
         local pr_title="chore(automation): Bundle SHA reference update for $version"
@@ -855,6 +878,8 @@ main() {
     local target_branch="${2:-main}"
     local dry_run="${3:-true}"
     
+    unset BUNDLE_SYNC_EXISTING_BRANCH_PUSH_MODE
+    
     # Validate tools
     validate_tools
     
@@ -883,14 +908,15 @@ main() {
     local sha_mapping
     
     if ! extract_sha_references "$snapshot_name" "$version" "$target_branch" > "$temp_sha_stdout" 2> "$temp_sha_stderr"; then
-        cat "$temp_sha_stderr" >&2
+        # Replay to stdout so ./script >>file captures validation/extract logs (not only stderr)
+        cat "$temp_sha_stderr"
         log_error "Failed to extract SHA references. Component validation may have failed."
         rm -f "$temp_sha_stdout" "$temp_sha_stderr"
         return 1
     fi
     
-    # Display log output
-    cat "$temp_sha_stderr" >&2
+    # Replay subprocess diagnostics to stdout (same stream as log); use >>log 2>&1 for log_error/skopeo on stderr
+    cat "$temp_sha_stderr"
     
     # Get the JSON from stdout - read entire content, jq can handle multi-line JSON
     sha_mapping=$(cat "$temp_sha_stdout" 2>/dev/null)
@@ -954,9 +980,9 @@ main() {
     update_result=$?
     set -e
     
-    # Replay captured function logs on stderr so timestamped log wrappers and tee -a file 2>&1 behave consistently
+    # Replay to stdout so ./script >>file includes Containerfile update preview logs
     if [ -s "$temp_result_file" ]; then
-        cat "$temp_result_file" >&2
+        cat "$temp_result_file"
     fi
     
     local dry_run_would_update=""
