@@ -49,9 +49,7 @@ class SlackBuilder:
         block = {"type": "section", "text": {"type": "mrkdwn", "text": text}}
 
         if fields:
-            block["fields"] = [
-                {"type": "mrkdwn", "text": f} for f in fields[:10]
-            ]
+            block["fields"] = [{"type": "mrkdwn", "text": f} for f in fields[:10]]
         self._blocks.append(block)
         return self
 
@@ -130,9 +128,7 @@ class SlackBuilder:
             return el
 
         @staticmethod
-        def link(
-            url: str, text: Optional[str] = None, bold=False
-        ) -> dict[str, Any]:
+        def link(url: str, text: Optional[str] = None, bold=False) -> dict[str, Any]:
             el: dict[str, str | dict] = {"type": "link", "url": url}
             if text:
                 el["text"] = text
@@ -298,9 +294,7 @@ class Slack:
         try:
             ts = self.send_block(header.build(), self.channel)
             tses.append(ts)
-            tses.append(
-                self.send_block(ocp_versions.build(), self.channel, ts)
-            )
+            tses.append(self.send_block(ocp_versions.build(), self.channel, ts))
             tses.append(self.send_block(prev_build.build(), self.channel, ts))
             for ds in diff_sections:
                 tses.append(self.send_block(ds.build(), self.channel, ts))
@@ -318,9 +312,7 @@ class Slack:
 
     def send_block(self, blocks: list, channel: str, ts: str = "") -> str:
         if not ts:
-            response = self.client.chat_postMessage(
-                channel=channel, blocks=blocks
-            )
+            response = self.client.chat_postMessage(channel=channel, blocks=blocks)
         else:
             response = self.client.chat_postMessage(
                 channel=channel,
@@ -388,24 +380,25 @@ class Slack:
             result = job.job_result.result
             result_emoji = self._get_ci_status_emoji(result)
             analysis_url = job.html_report_url
-            blocks.append(
-                {
-                    "type": "section",
+            block = {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"{result_emoji} <{job_url}|{job_name} #{build_number}>",
+                },
+            }
+            if analysis_url:
+                block["accessory"] = {
+                    "type": "button",
                     "text": {
-                        "type": "mrkdwn",
-                        "text": f"{result_emoji} <{job_url}|{job_name} #{build_number}>",
+                        "type": "plain_text",
+                        "text": "Analysis",
+                        "emoji": True,
                     },
-                    "accessory": {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Analysis",
-                            "emoji": True,
-                        },
-                        "url": analysis_url,
-                    },
+                    "url": analysis_url,
                 }
-            )
+
+            blocks.append(block)
 
         ts = self.send_block(
             blocks,

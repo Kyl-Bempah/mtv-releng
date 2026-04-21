@@ -13,26 +13,28 @@ logger = logging.getLogger(__name__)
 
 
 class JenkinsAnalyzer:
-    def analyze_job(
-        self, job_result: JenkinsJobResultDTO
-    ) -> JenkinsJobAnalysisDTO:
-        logger.info(f"Analyzing job result for {job_result.url}")
-        resp = requests.post(
-            f"{config.get_jenkins_analyzer_url().rstrip("/")}/analyze",
-            headers={"Content-Type": "application/json"},
-            json={
-                "job_name": job_result.job.job_name,
-                "build_number": job_result.job.build_number,
-                "ai_provider": "cursor",
-                "ai_model": "gpt-5.4-xhigh-fast",
-            },
-            verify=False,
-        )
-        resp.raise_for_status()
-        data = json.loads(resp.content)
-        analysis = self._process_data(data, job_result)
+    def analyze_job(self, job_result: JenkinsJobResultDTO) -> JenkinsJobAnalysisDTO:
+        if job_result.result.lower() == "failure":
+            logger.info(f"Analyzing job result for {job_result.url}")
+            resp = requests.post(
+                f"{config.get_jenkins_analyzer_url().rstrip('/')}/analyze",
+                headers={"Content-Type": "application/json"},
+                json={
+                    "job_name": job_result.job.job_name,
+                    "build_number": job_result.job.build_number,
+                    "ai_provider": "cursor",
+                    "ai_model": "gpt-5.4-xhigh-fast",
+                },
+                verify=False,
+            )
+            resp.raise_for_status()
+            data = json.loads(resp.content)
+            analysis = self._process_data(data, job_result)
 
-        return analysis
+            return analysis
+        return JenkinsJobAnalysisDTO(
+            job_result=job_result, summary="", child_jobs=[], html_report_url=""
+        )
 
     def _process_data(
         self, data: dict, job_result: JenkinsJobResultDTO
@@ -43,7 +45,7 @@ class JenkinsAnalyzer:
                 continue
             try:
                 bn = int(child.get("build_number") or 0)
-            except (TypeError, ValueError):
+            except TypeError, ValueError:
                 bn = 0
             children.append(
                 JenkinsChildJobAnalysisDTO(
