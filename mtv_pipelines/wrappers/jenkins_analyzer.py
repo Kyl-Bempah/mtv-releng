@@ -24,6 +24,7 @@ class JenkinsAnalyzer:
                     "build_number": job_result.job.build_number,
                     "ai_provider": "cursor",
                     "ai_model": "gpt-5.4-xhigh-fast",
+                    "get_job_artifacts": True,
                 },
                 verify=False,
             )
