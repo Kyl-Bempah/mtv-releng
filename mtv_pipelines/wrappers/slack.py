@@ -359,8 +359,10 @@ class Slack:
             return ":failed:"
         elif status.lower() == "unstable":
             return ":yellow-checkmark:"
-        else:
+        elif status.lower() == "success":
             return ":done-circle-check:"
+        else:
+            return ":question:"
 
     def _get_user_tags(self, jobs: list[JenkinsJobAnalysisDTO]) -> dict:
         statuses = [job.job_result.result.lower() == "failure" for job in jobs]
@@ -431,6 +433,24 @@ class Slack:
                 }
 
             blocks.append(block)
+
+        blocks.append({"type": "divider"})
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": (
+                            ":done-circle-check: Success  |  "
+                            ":yellow-checkmark: Unstable  |  "
+                            ":failed: Failure  |  "
+                            ":question: Unknown"
+                        ),
+                    }
+                ],
+            }
+        )
 
         ts = self.send_block(
             blocks,
