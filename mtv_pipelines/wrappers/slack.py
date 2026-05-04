@@ -357,6 +357,8 @@ class Slack:
     def _get_ci_status_emoji(self, status: str) -> str:
         if status.lower() == "failure":
             return ":failed:"
+        elif status.lower() == "unstable":
+            return ":yellow-checkmark:"
         else:
             return ":done-circle-check:"
 
