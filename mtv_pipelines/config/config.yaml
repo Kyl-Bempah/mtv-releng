@@ -100,7 +100,7 @@ jenkins_url: "https://jenkins-csb-mtv-qe-main.dno.corp.redhat.com"
 jenkins_wait_refresh_seconds: 60
 
 # Jenkins analyzer URL
-jenkins_analyzer_url: "https://jenkins-job-insight-mtv-team.apps.cnv2.engineering.redhat.com"
+jenkins_analyzer_url: "https://rootcoz-mtv-team.apps.cnv2.engineering.redhat.com"
 
 # Database path (SQLite)
 db_path: "sqlite:////app/data/mtv.db"
