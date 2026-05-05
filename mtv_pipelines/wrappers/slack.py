@@ -361,6 +361,8 @@ class Slack:
             return ":yellow-checkmark:"
         elif status.lower() == "success":
             return ":done-circle-check:"
+        elif status.lower() == "aborted":
+            return ":heavy_multiplication_x:"
         else:
             return ":question:"
 
@@ -445,6 +447,7 @@ class Slack:
                             ":done-circle-check: Success  |  "
                             ":yellow-checkmark: Unstable  |  "
                             ":failed: Failure  |  "
+                            ":heavy_multiplication_x: Aborted  |  "
                             ":question: Unknown"
                         ),
                     }
