@@ -176,7 +176,7 @@ cmp_mappings:
   mtv-vsphere-copy-offload-populator-rhel9:
     upstream: "vsphere-copy-offload-populator"
     origin: "forklift"
-  
+
   mtv-vsphere-xcopy-volume-populator-rhel9:
     upstream: "vsphere-xcopy-volume-populator"
     origin: "forklift"
@@ -203,4 +203,8 @@ cmp_mappings:
 
   mtv-hyperv-provider-server-rhel9:
     upstream: "hyperv-provider-server"
+    origin: "forklift"
+
+  mtv-deep-inspection-rhel10:
+    upstream: "deep-inspection"
     origin: "forklift"

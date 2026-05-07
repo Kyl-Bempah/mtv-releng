@@ -98,6 +98,10 @@ spec:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-operator-bundle-${version}
       source: registry.redhat.io/${repo}/mtv-operator-bundle
     - mirrors:
+        - registry.stage.redhat.io/${repo}/mtv-deep-inspection-rhel10
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/deep-inspection-${version}
+      source: registry.redhat.io/${repo}/mtv-deep-inspection-rhel10
+    - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-controller-${version}
       source: registry.stage.redhat.io/${repo}/mtv-controller-rhel9
     - mirrors:
@@ -151,6 +155,9 @@ spec:
     - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-ova-proxy-${version}
       source: registry.stage.redhat.io/${repo}/mtv-ova-proxy-rhel9
+    - mirrors:
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/deep-inspection-${version}
+      source: registry.stage.redhat.io/${repo}/mtv-deep-inspection-rhel10
 
 EOF
 
