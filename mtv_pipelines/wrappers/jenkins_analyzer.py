@@ -2,6 +2,7 @@ import json
 import logging
 
 import requests
+from auth.auth import RootcozAuth
 from config import config
 from models.dto import (
     JenkinsChildJobAnalysisDTO,
@@ -18,7 +19,7 @@ class JenkinsAnalyzer:
             logger.info(f"Analyzing job result for {job_result.url}")
             resp = requests.post(
                 f"{config.get_jenkins_analyzer_url().rstrip('/')}/analyze",
-                headers={"Content-Type": "application/json"},
+                headers={"Content-Type": "application/json", "Authorization": RootcozAuth().bearer_header},
                 json={
                     "job_name": job_result.job.job_name,
                     "build_number": job_result.job.build_number,

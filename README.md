@@ -70,6 +70,7 @@ make run        # run the container
 | `REGISTRY_PROD_USER` / `REGISTRY_PROD_TOKEN` | Production registry credentials |
 | `REGISTRY_STAGE_USER` / `REGISTRY_STAGE_TOKEN` | Stage registry credentials |
 | `STORAGE_OFFLOAD_CLUSTER` | Storage offload cluster password (optional) |
+| `ROOTCOZ` | Rootcoz Bearer token for the Jenkins analyzer API |
 
 ---
 
