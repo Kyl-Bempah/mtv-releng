@@ -196,3 +196,13 @@ class JenkinsJobAnalysisDTO(BaseModel):
 class JenkinsJobResultToBuildTSDTO(BaseModel):
     jobs: list[JenkinsJobResultDTO]
     timestamp: SlackBuildMessageTSDTO
+
+
+class ZStreamBumpResultDTO(BaseModel):
+    origin: str
+    branch: str
+    old_version: str
+    new_version: str
+    pr_url: str = ""
+    skipped: bool = False
+    skip_reason: str = ""

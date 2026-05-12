@@ -3,8 +3,6 @@ import logging
 import re
 import subprocess
 
-from config import config
-
 from mtv_pipelines.auth import auth
 
 COMMAND = ["gh"]
@@ -69,13 +67,14 @@ class GHCLI:
         return json.loads(self.__exec__())
 
     # Example:
-    # gh pr create --title "$version" --base main --body "" --label automation
+    # gh pr create --title "$version" --base main --head bump-branch --body "" --label automation
     def create_pr(
         self,
         title: str,
         label: str = AUTOMATION_LABEL,
         body: str = "",
         target_branch: str = "main",
+        head_branch: str = "",
     ):
         self.cmd.extend(
             [
@@ -91,14 +90,15 @@ class GHCLI:
                 label,
             ]
         )
+        if head_branch:
+            self.cmd.extend(["--head", head_branch])
         logger.debug(
             f"Creating PR '{title}' with '{body}' targeting '{target_branch}' with label '{label}'"
         )
         output = self.__exec__()
 
-        # https:\/\/github\.com\/kubev2v\/mtv-fbc\/pull/\d*
-        pattern = config.get_mtv_fbc_repo().replace("/", r"\/")
-        pattern += r"/pull\/(\d*)"
+        # Match any GitHub PR URL, e.g. https://github.com/kubev2v/forklift/pull/123
+        pattern = r"https://github\.com/[\w.-]+/[\w.-]+/pull/\d+"
         match = re.search(pattern, str(output))
 
         if match:

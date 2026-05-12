@@ -1,0 +1,298 @@
+import logging
+import os
+import re
+import argparse
+from argparse import ArgumentParser, Namespace
+from asyncio import TaskGroup, to_thread
+
+from config import config
+from core.task import depends_on, task
+from models.dto import (
+    EmptyDTO,
+    MTVBranchVersionDTO,
+    MTVRepoBranchVersionsDTO,
+    MTVVersionsDTO,
+    VersionDTO,
+    ZStreamBumpResultDTO,
+)
+from models.git_repo import GitRepo
+from semver import Version
+from tasks.get_mtv_versions import get_mtv_versions
+from wrappers.gh_cli import GHCLI
+
+DESCRIPTION = "Bump z-stream (patch) version of MTV for all configured origins"
+
+logger = logging.getLogger(__name__)
+
+
+
+def arg_parse(arg_parser: ArgumentParser):
+    arg_parser.formatter_class = argparse.RawTextHelpFormatter
+    origins = list(config.get_mtv_repositories().keys())
+    arg_parser.add_argument(
+        "-b",
+        "--branch",
+        help="Release branch to process (e.g. release-2.10). Can be specified multiple times.",
+        action="append",
+        dest="branches",
+        metavar="BRANCH",
+        required=True,
+    )
+    arg_parser.add_argument(
+        "-o",
+        "--origin",
+        help="Origin repository to process. Can be specified multiple times. Defaults to all origins.\nChoices:\n" + "\n".join(f"  {o}" for o in origins),
+        action="append",
+        dest="origins",
+        metavar="ORIGIN",
+        choices=origins,
+    )
+    arg_parser.add_argument(
+        "-n",
+        "--new-version",
+        help=(
+            "Explicitly set the new version (format X.Y.Z) instead of "
+            "auto-incrementing the patch number. "
+            "Cannot be used when multiple branches are specified."
+        ),
+        metavar="VERSION",
+    )
+    arg_parser.add_argument(
+        "--dry-run",
+        help="Log what would be done without pushing any changes or creating PRs.",
+        action="store_true",
+        default=False,
+    )
+
+
+@task
+async def fetch_versions(
+    data: EmptyDTO, args: Namespace, tg: TaskGroup
+) -> MTVVersionsDTO:
+    if args.new_version and len(args.branches) > 1:
+        raise ValueError(
+            "--new-version cannot be used when multiple branches are specified. "
+            "An explicit version is ambiguous across different Y-streams."
+        )
+
+    logger.info("Fetching current MTV versions from all configured origins...")
+    raw: dict[str, dict[str, str]] = await to_thread(get_mtv_versions)
+
+    all_branches = config.get_mtv_branches()
+    unknown = [b for b in args.branches if b not in all_branches]
+    if unknown:
+        logger.warning(f"Branches not found in config, will be ignored: {unknown}")
+    target_branches = [b for b in args.branches if b in all_branches]
+
+    logger.info(f"Targeting branches: {target_branches}")
+
+    target_origins = args.origins or list(raw.keys())
+
+    repo_versions: list[MTVRepoBranchVersionsDTO] = []
+    for origin, branch_map in raw.items():
+        if origin not in target_origins:
+            continue
+        branch_versions: list[MTVBranchVersionDTO] = []
+        for branch, version_str in branch_map.items():
+            if branch not in target_branches:
+                continue
+            v = Version.parse(version_str)
+            branch_versions.append(
+                MTVBranchVersionDTO(
+                    branch=branch,
+                    version=VersionDTO(
+                        major=v.major,
+                        minor=v.minor,
+                        patch=v.patch,
+                        prerelease=None,
+                    ),
+                )
+            )
+        if branch_versions:
+            repo_versions.append(
+                MTVRepoBranchVersionsDTO(repo=origin, branch_versions=branch_versions)
+            )
+
+    return MTVVersionsDTO(versions=repo_versions)
+
+
+@task
+@depends_on(fetch_versions)
+async def apply_version_bumps(
+    data: MTVVersionsDTO, args: Namespace, tg: TaskGroup
+) -> list[ZStreamBumpResultDTO]:
+    repositories = config.get_mtv_repositories()
+    release_conf_path = config.get_release_conf_path()
+    results: list[ZStreamBumpResultDTO] = []
+
+    async def bump_one(origin: str, branch: str, old_version_str: str) -> ZStreamBumpResultDTO:
+        old_v = Version.parse(old_version_str)
+
+        if args.new_version:
+            try:
+                new_v = Version.parse(args.new_version)
+            except ValueError as e:
+                return ZStreamBumpResultDTO(
+                    origin=origin,
+                    branch=branch,
+                    old_version=old_version_str,
+                    new_version=args.new_version,
+                    skipped=True,
+                    skip_reason=f"Invalid --new-version value: {e}",
+                )
+        else:
+            new_v = old_v.bump_patch()
+
+        if new_v <= old_v:
+            return ZStreamBumpResultDTO(
+                origin=origin,
+                branch=branch,
+                old_version=old_version_str,
+                new_version=str(new_v),
+                skipped=True,
+                skip_reason=f"New version {new_v} is not greater than current {old_v}",
+            )
+
+        repo_url = (repositories.get(origin) or "").rstrip("/") or None
+        if not repo_url:
+            return ZStreamBumpResultDTO(
+                origin=origin,
+                branch=branch,
+                old_version=old_version_str,
+                new_version=str(new_v),
+                skipped=True,
+                skip_reason=f"No URL configured for origin '{origin}'",
+            )
+
+        logger.info(f"[{origin}/{branch}] Bumping {old_v} → {new_v}")
+
+        if args.dry_run:
+            logger.info(
+                f"[{origin}/{branch}] Dry-run: would bump from {old_v} "
+                f"to {new_v} and open a PR targeting '{branch}'"
+            )
+            return ZStreamBumpResultDTO(
+                origin=origin,
+                branch=branch,
+                old_version=str(old_v),
+                new_version=str(new_v),
+            )
+
+        # Clone the origin repository
+        repo = GitRepo(url=repo_url, name=origin, version=str(old_v))
+        await repo.init()
+
+        repo.git.config("user.email", config.get_git_email())
+        repo.git.config("user.name", config.get_git_name())
+
+        GHCLI(repo.tmp_dir.name).auth()
+
+        # Checkout the target release branch
+        try:
+            repo.git.checkout(branch=branch)
+        except Exception as e:
+            return ZStreamBumpResultDTO(
+                origin=origin,
+                branch=branch,
+                old_version=str(old_v),
+                new_version=str(new_v),
+                skipped=True,
+                skip_reason=f"Could not checkout '{branch}': {e}",
+            )
+
+        # Read build/release.conf
+        conf_path = os.path.join(repo.tmp_dir.name, release_conf_path)
+        if not os.path.exists(conf_path):
+            return ZStreamBumpResultDTO(
+                origin=origin,
+                branch=branch,
+                old_version=str(old_v),
+                new_version=str(new_v),
+                skipped=True,
+                skip_reason=f"'{release_conf_path}' not found in cloned repo",
+            )
+
+        with open(conf_path) as f:
+            content = f.read()
+
+        # Match any *VERSION=X.Y.Z line (covers VERSION=, RVERSION=, MTV_VERSION=, etc.)
+        # mirrors the same pattern used in get_mtv_versions
+        pattern = r"^(\w*VERSION=)(\d+\.\d+\.\d+)$"
+        new_content, substitutions = re.subn(
+            pattern, rf"\g<1>{new_v}", content, flags=re.MULTILINE
+        )
+
+        if substitutions == 0:
+            return ZStreamBumpResultDTO(
+                origin=origin,
+                branch=branch,
+                old_version=str(old_v),
+                new_version=str(new_v),
+                skipped=True,
+                skip_reason=f"No '*VERSION=X.Y.Z' line found in '{release_conf_path}'",
+            )
+
+        with open(conf_path, "w") as f:
+            f.write(new_content)
+
+        # Create a new branch for the PR
+        pr_branch = f"bump-zstream-{branch}-{new_v}"
+        repo.git.checkout(branch=pr_branch, create=True)
+        repo.git.add_files([release_conf_path])
+        repo.git.commit(
+            f"chore(version): bump z-stream version to {new_v}\n\n"
+            f"Updates version from {old_v} to {new_v} in {release_conf_path}"
+        )
+
+        try:
+            repo.git.push(branch=pr_branch)
+        except RuntimeError as e:
+            logger.error(f"[{origin}/{branch}] Push failed: {e}")
+            return ZStreamBumpResultDTO(
+                origin=origin,
+                branch=branch,
+                old_version=str(old_v),
+                new_version=str(new_v),
+                skipped=True,
+                skip_reason=f"Push failed: {e}",
+            )
+
+        # Open a PR targeting the release branch
+        pr_url = ""
+        try:
+            pr_url = GHCLI(repo.tmp_dir.name).create_pr(
+                title=f"chore(version): bump z-stream version to {new_v}",
+                body=(
+                    f"Automated z-stream version bump.\n\n"
+                    f"Updates version from `{old_v}` → `{new_v}` in `{release_conf_path}`."
+                ),
+                target_branch=branch,
+                head_branch=pr_branch,
+            )
+            logger.info(f"[{origin}/{branch}] PR created: {pr_url}")
+        except RuntimeError as e:
+            logger.warning(f"[{origin}/{branch}] PR creation failed: {e}")
+
+        return ZStreamBumpResultDTO(
+            origin=origin,
+            branch=branch,
+            old_version=str(old_v),
+            new_version=str(new_v),
+            pr_url=pr_url,
+        )
+
+    bump_tasks = []
+    for repo_dto in data.versions:
+        for bv in repo_dto.branch_versions:
+            old_version_str = (
+                f"{bv.version.major}.{bv.version.minor}.{bv.version.patch}"
+            )
+            bump_tasks.append(
+                tg.create_task(bump_one(repo_dto.repo, bv.branch, old_version_str))
+            )
+
+    for t in bump_tasks:
+        results.append(await t)
+
+    return results
+

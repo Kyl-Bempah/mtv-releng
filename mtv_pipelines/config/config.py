@@ -153,3 +153,7 @@ def get_db_path() -> str:
 
 def get_ui_cluster_mapping() -> dict:
     return _parse_simple("ui_cluster_mapping")
+
+
+def get_release_conf_path() -> str:
+    return _parse_simple("release_conf_path")

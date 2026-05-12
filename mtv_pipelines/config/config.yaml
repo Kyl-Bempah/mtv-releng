@@ -114,6 +114,9 @@ allowed_project_keys:
   - "CNV"
   - "KFLUXSPRT"
 
+# Path to the version config file within each origin repository
+release_conf_path: "build/release.conf"
+
 # Forklift "component" repositories
 repositories:
   forklift: "https://github.com/kubev2v/forklift"

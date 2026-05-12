@@ -98,6 +98,7 @@ def setup_logging(level, pipeline_name):
     logger = logging.getLogger()
     logger.setLevel(logging.DEBUG)
 
+    os.makedirs("logs", exist_ok=True)
     file_handler = logging.FileHandler(
         f"logs/{pipeline_name}_{datetime.datetime.now(datetime.UTC).strftime('%Y-%m-%d_%H-%M-%S')}.log",
         mode="w",
