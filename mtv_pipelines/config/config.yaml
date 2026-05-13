@@ -46,7 +46,8 @@ git_email: "mtv-automation@redhat.com"
 git_label: "automation"
 
 # FBC fragment image URL template
-fbc_component_url: "quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-fbc-prod-{ocp}:on-pr-{commit}"
+fbc_component_url: "quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-fbc-\
+  prod-{ocp}:on-pr-{commit}"
 
 # FBC component konflux name template
 fbc_component_name: "forklift-fbc-comp-prod-{ocp}"
@@ -124,12 +125,16 @@ repositories:
   forklift-must-gather: "https://github.com/kubev2v/forklift-must-gather"
   # forklift-int: "https://gitlab.cee.redhat.com/mtv/forklift" # don't use internal git because it needs auth
 
-# Raw mappings
+  # Raw mappings
 raw_mappings:
-  forklift: "https://raw.githubusercontent.com/kubev2v/forklift/refs/heads/{branch}/build/release.conf"
-  forklift-console-plugin: "https://raw.githubusercontent.com/kubev2v/forklift-console-plugin/refs/heads/{branch}/build/release.conf"
-  forklift-must-gather: "https://raw.githubusercontent.com/kubev2v/forklift-must-gather/refs/heads/{branch}/build/release.conf"
-  forklift-int: "https://gitlab.cee.redhat.com/mtv/forklift/-/raw/{branch}/build/release.conf"
+  forklift: "https://raw.githubusercontent.com/kubev2v/forklift/refs/heads/{branc\
+    h}/build/release.conf"
+  forklift-console-plugin: "https://raw.githubusercontent.com/kubev2v/forklift-co\
+    nsole-plugin/refs/heads/{branch}/build/release.conf"
+  forklift-must-gather: "https://raw.githubusercontent.com/kubev2v/forklift-must-\
+    gather/refs/heads/{branch}/build/release.conf"
+  forklift-int: "https://gitlab.cee.redhat.com/mtv/forklift/-/raw/{branch}/build/\
+    release.conf"
 
 # Component mappings
 # mapping key = Downstream name of the component (e.g. image repository in comet)
@@ -210,4 +215,8 @@ cmp_mappings:
 
   mtv-deep-inspection-rhel10:
     upstream: "deep-inspection"
+    origin: "forklift"
+
+  mtv-deep-inspection-rhel9:
+    upstream: "deep-inspection-rhel9"
     origin: "forklift"
