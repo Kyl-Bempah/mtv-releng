@@ -145,7 +145,7 @@ cmp_mappings:
     upstream: "forklift-controller"
     origin: "forklift"
 
-  mtv-must-gather-rhel8:
+  mtv-must-gather-rhel9:
     upstream: "forklift-must-gather"
     origin: "forklift-must-gather"
 
