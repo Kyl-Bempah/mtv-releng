@@ -19,13 +19,17 @@ class JenkinsAnalyzer:
             logger.info(f"Analyzing job result for {job_result.url}")
             resp = requests.post(
                 f"{config.get_jenkins_analyzer_url().rstrip('/')}/analyze",
-                headers={"Content-Type": "application/json", "Authorization": RootcozAuth().bearer_header},
+                headers={
+                    "Content-Type": "application/json",
+                    "Authorization": RootcozAuth().bearer_header,
+                },
                 json={
                     "job_name": job_result.job.job_name,
                     "build_number": job_result.job.build_number,
                     "ai_provider": "cursor",
                     "ai_model": "gpt-5.4-xhigh-fast",
                     "get_job_artifacts": True,
+                    "type": "jenkins",
                 },
                 verify=False,
             )
