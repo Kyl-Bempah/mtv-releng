@@ -32,6 +32,7 @@ versions:
 # Used for tracking the "konflux enabled" branches
 branches:
   - "main"
+  - "release-2.12"
   - "release-2.11"
   - "release-2.10"
   - "release-2.9"
