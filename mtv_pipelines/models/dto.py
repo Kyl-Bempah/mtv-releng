@@ -198,7 +198,7 @@ class JenkinsJobResultToBuildTSDTO(BaseModel):
     timestamp: SlackBuildMessageTSDTO
 
 
-class ZStreamBumpResultDTO(BaseModel):
+class ReversionResultDTO(BaseModel):
     origin: str
     branch: str
     old_version: str

@@ -13,17 +13,22 @@ from models.dto import (
     MTVRepoBranchVersionsDTO,
     MTVVersionsDTO,
     VersionDTO,
-    ZStreamBumpResultDTO,
+    ReversionResultDTO,
 )
 from models.git_repo import GitRepo
 from semver import Version
 from tasks.get_mtv_versions import get_mtv_versions
 from wrappers.gh_cli import GHCLI
 
-DESCRIPTION = "Bump z-stream (patch) version of MTV for all configured origins"
+DESCRIPTION = (
+    "Re-version MTV across all configured origin repositories.\n\n"
+    "Reads the current version from each repo's release.conf, increments the patch\n"
+    "number (or uses an explicit --new-version), updates the file, and opens a PR\n"
+    "targeting the release branch. Multiple branches and origins can be processed\n"
+    "in a single run."
+)
 
 logger = logging.getLogger(__name__)
-
 
 
 def arg_parse(arg_parser: ArgumentParser):
@@ -41,7 +46,8 @@ def arg_parse(arg_parser: ArgumentParser):
     arg_parser.add_argument(
         "-o",
         "--origin",
-        help="Origin repository to process. Can be specified multiple times. Defaults to all origins.\nChoices:\n" + "\n".join(f"  {o}" for o in origins),
+        help="Origin repository to process. Can be specified multiple times. Defaults to all origins.\nChoices:\n"
+        + "\n".join(f"  {o}" for o in origins),
         action="append",
         dest="origins",
         metavar="ORIGIN",
@@ -81,10 +87,15 @@ async def fetch_versions(
     all_branches = config.get_mtv_branches()
     unknown = [b for b in args.branches if b not in all_branches]
     if unknown:
-        logger.warning(f"Branches not found in config, will be ignored: {unknown}")
+        logger.warning(
+            {
+                "msg": "Branches not found in config, will be ignored",
+                "branches": unknown,
+            }
+        )
     target_branches = [b for b in args.branches if b in all_branches]
 
-    logger.info(f"Targeting branches: {target_branches}")
+    logger.info({"msg": "Targeting branches", "branches": target_branches})
 
     target_origins = args.origins or list(raw.keys())
 
@@ -118,21 +129,23 @@ async def fetch_versions(
 
 @task
 @depends_on(fetch_versions)
-async def apply_version_bumps(
+async def apply_version_changes(
     data: MTVVersionsDTO, args: Namespace, tg: TaskGroup
-) -> list[ZStreamBumpResultDTO]:
+) -> list[ReversionResultDTO]:
     repositories = config.get_mtv_repositories()
     release_conf_path = config.get_release_conf_path()
-    results: list[ZStreamBumpResultDTO] = []
+    results: list[ReversionResultDTO] = []
 
-    async def bump_one(origin: str, branch: str, old_version_str: str) -> ZStreamBumpResultDTO:
+    async def reversion_one(
+        origin: str, branch: str, old_version_str: str
+    ) -> ReversionResultDTO:
         old_v = Version.parse(old_version_str)
 
         if args.new_version:
             try:
                 new_v = Version.parse(args.new_version)
             except ValueError as e:
-                return ZStreamBumpResultDTO(
+                return ReversionResultDTO(
                     origin=origin,
                     branch=branch,
                     old_version=old_version_str,
@@ -144,7 +157,7 @@ async def apply_version_bumps(
             new_v = old_v.bump_patch()
 
         if new_v <= old_v:
-            return ZStreamBumpResultDTO(
+            return ReversionResultDTO(
                 origin=origin,
                 branch=branch,
                 old_version=old_version_str,
@@ -155,7 +168,7 @@ async def apply_version_bumps(
 
         repo_url = (repositories.get(origin) or "").rstrip("/") or None
         if not repo_url:
-            return ZStreamBumpResultDTO(
+            return ReversionResultDTO(
                 origin=origin,
                 branch=branch,
                 old_version=old_version_str,
@@ -164,14 +177,28 @@ async def apply_version_bumps(
                 skip_reason=f"No URL configured for origin '{origin}'",
             )
 
-        logger.info(f"[{origin}/{branch}] Bumping {old_v} → {new_v}")
+        logger.info(
+            {
+                "msg": f"Version changed to {new_v}",
+                "origin": origin,
+                "branch": branch,
+                "old_version": str(old_v),
+                "new_version": str(new_v),
+            }
+        )
 
         if args.dry_run:
             logger.info(
-                f"[{origin}/{branch}] Dry-run: would bump from {old_v} "
-                f"to {new_v} and open a PR targeting '{branch}'"
+                {
+                    "msg": f"Dry-run: would update version to {new_v} and open PR",
+                    "origin": origin,
+                    "branch": branch,
+                    "old_version": str(old_v),
+                    "new_version": str(new_v),
+                    "target_branch": branch,
+                }
             )
-            return ZStreamBumpResultDTO(
+            return ReversionResultDTO(
                 origin=origin,
                 branch=branch,
                 old_version=str(old_v),
@@ -191,7 +218,7 @@ async def apply_version_bumps(
         try:
             repo.git.checkout(branch=branch)
         except Exception as e:
-            return ZStreamBumpResultDTO(
+            return ReversionResultDTO(
                 origin=origin,
                 branch=branch,
                 old_version=str(old_v),
@@ -203,7 +230,7 @@ async def apply_version_bumps(
         # Read build/release.conf
         conf_path = os.path.join(repo.tmp_dir.name, release_conf_path)
         if not os.path.exists(conf_path):
-            return ZStreamBumpResultDTO(
+            return ReversionResultDTO(
                 origin=origin,
                 branch=branch,
                 old_version=str(old_v),
@@ -223,7 +250,7 @@ async def apply_version_bumps(
         )
 
         if substitutions == 0:
-            return ZStreamBumpResultDTO(
+            return ReversionResultDTO(
                 origin=origin,
                 branch=branch,
                 old_version=str(old_v),
@@ -236,19 +263,27 @@ async def apply_version_bumps(
             f.write(new_content)
 
         # Create a new branch for the PR
-        pr_branch = f"bump-zstream-{branch}-{new_v}"
+        pr_branch = f"reversion-{branch}-{new_v}"
         repo.git.checkout(branch=pr_branch, create=True)
         repo.git.add_files([release_conf_path])
         repo.git.commit(
-            f"chore(version): bump z-stream version to {new_v}\n\n"
-            f"Updates version from {old_v} to {new_v} in {release_conf_path}"
+            f"chore(version): version changed to {new_v}\n\n"
+            f"Version changed from {old_v} to {new_v} in {release_conf_path}"
         )
 
         try:
             repo.git.push(branch=pr_branch)
         except RuntimeError as e:
-            logger.error(f"[{origin}/{branch}] Push failed: {e}")
-            return ZStreamBumpResultDTO(
+            logger.error(
+                {
+                    "msg": "Push failed",
+                    "origin": origin,
+                    "branch": branch,
+                    "pr_branch": pr_branch,
+                    "error": str(e),
+                }
+            )
+            return ReversionResultDTO(
                 origin=origin,
                 branch=branch,
                 old_version=str(old_v),
@@ -261,19 +296,32 @@ async def apply_version_bumps(
         pr_url = ""
         try:
             pr_url = GHCLI(repo.tmp_dir.name).create_pr(
-                title=f"chore(version): bump z-stream version to {new_v}",
+                title=f"chore(version): version changed to {new_v}",
                 body=(
-                    f"Automated z-stream version bump.\n\n"
-                    f"Updates version from `{old_v}` → `{new_v}` in `{release_conf_path}`."
+                    f"Version changed from `{old_v}` to `{new_v}` in `{release_conf_path}`."
                 ),
                 target_branch=branch,
                 head_branch=pr_branch,
             )
-            logger.info(f"[{origin}/{branch}] PR created: {pr_url}")
+            logger.info(
+                {
+                    "msg": "PR created",
+                    "origin": origin,
+                    "branch": branch,
+                    "pr_url": pr_url,
+                }
+            )
         except RuntimeError as e:
-            logger.warning(f"[{origin}/{branch}] PR creation failed: {e}")
+            logger.warning(
+                {
+                    "msg": "PR creation failed",
+                    "origin": origin,
+                    "branch": branch,
+                    "error": str(e),
+                }
+            )
 
-        return ZStreamBumpResultDTO(
+        return ReversionResultDTO(
             origin=origin,
             branch=branch,
             old_version=str(old_v),
@@ -281,18 +329,17 @@ async def apply_version_bumps(
             pr_url=pr_url,
         )
 
-    bump_tasks = []
+    reversion_tasks = []
     for repo_dto in data.versions:
         for bv in repo_dto.branch_versions:
             old_version_str = (
                 f"{bv.version.major}.{bv.version.minor}.{bv.version.patch}"
             )
-            bump_tasks.append(
-                tg.create_task(bump_one(repo_dto.repo, bv.branch, old_version_str))
+            reversion_tasks.append(
+                tg.create_task(reversion_one(repo_dto.repo, bv.branch, old_version_str))
             )
 
-    for t in bump_tasks:
+    for t in reversion_tasks:
         results.append(await t)
 
     return results
-
