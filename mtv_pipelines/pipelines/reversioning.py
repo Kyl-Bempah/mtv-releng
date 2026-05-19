@@ -37,7 +37,7 @@ def arg_parse(arg_parser: ArgumentParser):
     arg_parser.add_argument(
         "-b",
         "--branch",
-        help="Release branch to process (e.g. release-2.10). Can be specified multiple times.",
+        help="[required] Release branch to process (e.g. release-2.10). Can be specified multiple times.",
         action="append",
         dest="branches",
         metavar="BRANCH",
@@ -46,7 +46,7 @@ def arg_parse(arg_parser: ArgumentParser):
     arg_parser.add_argument(
         "-o",
         "--origin",
-        help="Origin repository to process. Can be specified multiple times. Defaults to all origins.\nChoices:\n"
+        help="[optional] Origin repository to process. Can be specified multiple times. Defaults to all origins.\nChoices:\n"
         + "\n".join(f"  {o}" for o in origins),
         action="append",
         dest="origins",
@@ -57,15 +57,47 @@ def arg_parse(arg_parser: ArgumentParser):
         "-n",
         "--new-version",
         help=(
-            "Explicitly set the new version (format X.Y.Z) instead of "
+            "[optional] Explicitly set the new version (format X.Y.Z) instead of "
             "auto-incrementing the patch number. "
             "Cannot be used when multiple branches are specified."
         ),
         metavar="VERSION",
     )
     arg_parser.add_argument(
+        "--release",
+        metavar="RELEASE",
+        help='[optional] Override the RELEASE field in build/release.conf (e.g. "v2.13").',
+    )
+    arg_parser.add_argument(
+        "--cpe",
+        metavar="CPE",
+        help='[optional] Override the CPE field in build/release.conf (e.g. "2.13").',
+    )
+    arg_parser.add_argument(
+        "--channel",
+        metavar="CHANNEL",
+        help='[optional] Override the CHANNEL field in build/release.conf (e.g. "release-v2.13").',
+    )
+    arg_parser.add_argument(
+        "--default-channel",
+        dest="default_channel",
+        metavar="DEFAULT_CHANNEL",
+        help="[optional] Override the DEFAULT_CHANNEL field in build/release.conf.",
+    )
+    arg_parser.add_argument(
+        "--registry",
+        metavar="REGISTRY",
+        help='[optional] Override the REGISTRY field in build/release.conf (e.g. "migration-toolkit-virtualization").',
+    )
+    arg_parser.add_argument(
+        "--ocp-versions",
+        dest="ocp_versions",
+        metavar="OCP_VERSIONS",
+        help='[optional] Override the OCP_VERSIONS field in build/release.conf (e.g. "v4.17-v4.19").',
+    )
+    arg_parser.add_argument(
         "--dry-run",
-        help="Log what would be done without pushing any changes or creating PRs.",
+        help="[optional] Log what would be done without pushing any changes or creating PRs.",
         action="store_true",
         default=False,
     )
@@ -196,6 +228,16 @@ async def apply_version_changes(
                     "old_version": str(old_v),
                     "new_version": str(new_v),
                     "target_branch": branch,
+                    "extra_params": {
+                        k: v for k, v in {
+                            "RELEASE": args.release,
+                            "CPE": args.cpe,
+                            "CHANNEL": args.channel,
+                            "DEFAULT_CHANNEL": args.default_channel,
+                            "REGISTRY": args.registry,
+                            "OCP_VERSIONS": args.ocp_versions,
+                        }.items() if v is not None
+                    },
                 }
             )
             return ReversionResultDTO(
@@ -259,16 +301,47 @@ async def apply_version_changes(
                 skip_reason=f"No '*VERSION=X.Y.Z' line found in '{release_conf_path}'",
             )
 
+        # Apply explicit field overrides
+        _overridable = {
+            "RELEASE": args.release,
+            "CPE": args.cpe,
+            "CHANNEL": args.channel,
+            "DEFAULT_CHANNEL": args.default_channel,
+            "REGISTRY": args.registry,
+            "OCP_VERSIONS": args.ocp_versions,
+        }
+        extra_overrides: dict[str, str] = {}
+        for key, value in _overridable.items():
+            if value is None:
+                continue
+            new_content, n = re.subn(
+                rf"^({re.escape(key)}=).*$",
+                rf"\g<1>{value}",
+                new_content,
+                flags=re.MULTILINE,
+            )
+            if n == 0:
+                logger.warning(
+                    f"[{origin}] '{key}' not found in {release_conf_path}, skipping override"
+                )
+            else:
+                extra_overrides[key] = value
+                logger.info(f"[{origin}] Set {key}={value} in {release_conf_path}")
+
         with open(conf_path, "w") as f:
             f.write(new_content)
+
+        # Build commit/PR description lines
+        change_lines = [f"Version changed from {old_v} to {new_v} in {release_conf_path}"]
+        change_lines += [f"Set {k}={v}" for k, v in extra_overrides.items()]
+        change_summary = "\n".join(f"- {l}" for l in change_lines)
 
         # Create a new branch for the PR
         pr_branch = f"reversion-{branch}-{new_v}"
         repo.git.checkout(branch=pr_branch, create=True)
         repo.git.add_files([release_conf_path])
         repo.git.commit(
-            f"chore(version): version changed to {new_v}\n\n"
-            f"Version changed from {old_v} to {new_v} in {release_conf_path}"
+            f"chore(version): version changed to {new_v}\n\n{change_summary}"
         )
 
         try:
@@ -292,25 +365,36 @@ async def apply_version_changes(
                 skip_reason=f"Push failed: {e}",
             )
 
-        # Open a PR targeting the release branch
+        # Open a PR targeting the release branch, or reuse one that already exists
         pr_url = ""
+        gh = GHCLI(repo.tmp_dir.name)
         try:
-            pr_url = GHCLI(repo.tmp_dir.name).create_pr(
-                title=f"chore(version): version changed to {new_v}",
-                body=(
-                    f"Version changed from `{old_v}` to `{new_v}` in `{release_conf_path}`."
-                ),
-                target_branch=branch,
-                head_branch=pr_branch,
-            )
-            logger.info(
-                {
-                    "msg": "PR created",
-                    "origin": origin,
-                    "branch": branch,
-                    "pr_url": pr_url,
-                }
-            )
+            existing = gh.list_pr(branch=pr_branch)
+            if existing:
+                pr_url = existing[0]["url"]
+                logger.info(
+                    {
+                        "msg": "PR already exists, reusing",
+                        "origin": origin,
+                        "branch": branch,
+                        "pr_url": pr_url,
+                    }
+                )
+            else:
+                pr_url = gh.create_pr(
+                    title=f"chore(version): version changed to {new_v}",
+                    body=change_summary,
+                    target_branch=branch,
+                    head_branch=pr_branch,
+                )
+                logger.info(
+                    {
+                        "msg": "PR created",
+                        "origin": origin,
+                        "branch": branch,
+                        "pr_url": pr_url,
+                    }
+                )
         except RuntimeError as e:
             logger.warning(
                 {
