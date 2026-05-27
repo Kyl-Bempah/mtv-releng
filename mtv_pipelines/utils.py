@@ -1,6 +1,5 @@
 import logging
 import re
-import shutil
 import tempfile
 from typing import TYPE_CHECKING
 
@@ -30,22 +29,12 @@ def iib_short_for_target_ocp(iib_short: str, ocp_version: str) -> str:
     compact = f"v{stripped.replace('.', '')}"
     replaced, n = _FBC_PROD_OCP_INFIX.subn(rf"\g<1>{compact}", iib_short, count=1)
     return replaced if n else iib_short
-_temp_dirs: list[str] = []
 
 
-def create_temp_dir(suffix: str = "") -> str:
+def create_temp_dir(suffix: str = "") -> tempfile.TemporaryDirectory:
     if suffix:
         suffix = f"_{suffix}"
-    path = tempfile.mkdtemp(suffix=suffix)
-    _temp_dirs.append(path)
-    return path
-
-
-def cleanup_temp_dirs():
-    for path in _temp_dirs:
-        shutil.rmtree(path, ignore_errors=True)
-        logger.debug("Cleaned up temp dir: %s", path)
-    _temp_dirs.clear()
+    return tempfile.TemporaryDirectory(suffix=suffix)
 
 
 def replace_for_quay(image: str, version: Version) -> str:
@@ -91,7 +80,7 @@ def replace_for_quay(image: str, version: Version) -> str:
         logger.debug(f"Using dev-preview component {ver}")
 
     new_url = f"{registry}/{operator}-{ver}/"
-    new_url += f"{cmp_mappings[cmp].get("upstream")}-{ver}"
+    new_url += f"{cmp_mappings[cmp].get('upstream')}-{ver}"
 
     if sha:
         new_url += f"@sha256:{sha}"
@@ -118,9 +107,7 @@ def parse_version(fbc, ver: Version):
     else:
         # New dev-preview version that has no previous build for diff
         # New Y-stream version that doesn't make sense to compare to prev
-        logger.info(
-            f"Version {ver} doesn't have any good candidates for prev build"
-        )
+        logger.info(f"Version {ver} doesn't have any good candidates for prev build")
 
 
 # Extracts jira keys from commit messages (or any other text)
@@ -132,9 +119,7 @@ def extract_jira_keys(text: str) -> list[str]:
         return []
 
     # look for the "Resolves" section (highest priority)
-    resolve_match = re.search(
-        r"(?i)resolves:\s*(.*)", text_stripped, re.DOTALL
-    )
+    resolve_match = re.search(r"(?i)resolves:\s*(.*)", text_stripped, re.DOTALL)
 
     if resolve_match:
         # If "Resolves:" exists, we parse that section regardless of chore tags
@@ -166,6 +151,4 @@ def forklift_branch_from_jenkins_job(job: "JenkinsJobDTO") -> str:
     for branch, branch_ver in get_mtv_versions().items():
         if branch_ver.split(".")[:2] == xy:
             return branch
-    raise ValueError(
-        f"No forklift branch found for IIB version {job.iib_version}"
-    )
+    raise ValueError(f"No forklift branch found for IIB version {job.iib_version}")

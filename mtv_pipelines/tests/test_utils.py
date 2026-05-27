@@ -1,4 +1,3 @@
-import os
 from unittest.mock import MagicMock
 
 import pytest
@@ -8,30 +7,6 @@ from semver import Version
 import utils
 
 
-@pytest.fixture(autouse=True)
-def clear_temp_dirs():
-    utils._temp_dirs.clear()
-    yield
-    utils.cleanup_temp_dirs()
-
-
-class TestCreateTempDir:
-    def test_creates_directory_with_suffix(self):
-        path = utils.create_temp_dir("bundle")
-        assert os.path.isdir(path)
-        assert path.endswith("_bundle")
-
-    def test_creates_directory_without_suffix(self):
-        path = utils.create_temp_dir()
-        assert os.path.isdir(path)
-
-    def test_cleanup_removes_tracked_directories(self):
-        path = utils.create_temp_dir("cleanup")
-        utils.cleanup_temp_dirs()
-        assert not os.path.isdir(path)
-        assert utils._temp_dirs == []
-
-
 class TestReplaceForQuay:
     def test_non_redhat_image_is_unchanged(self):
         image = "docker.io/library/nginx:latest"
@@ -39,8 +14,7 @@ class TestReplaceForQuay:
 
     def test_release_namespace_with_tag(self):
         image = (
-            "registry.redhat.io/migration-toolkit-virtualization/"
-            "mtv-api-rhel9:2.11.0"
+            "registry.redhat.io/migration-toolkit-virtualization/mtv-api-rhel9:2.11.0"
         )
         result = utils.replace_for_quay(image, Version(2, 11, 0))
         assert result == (
@@ -114,9 +88,7 @@ class TestExtractJiraKeys:
         assert utils.extract_jira_keys("chore(deps): bump something") == []
 
     def test_extracts_allowed_project_key(self):
-        assert utils.extract_jira_keys("MTV-1234 fix migration bug") == [
-            "MTV-1234"
-        ]
+        assert utils.extract_jira_keys("MTV-1234 fix migration bug") == ["MTV-1234"]
 
     def test_resolves_section_takes_priority_over_chore_prefix(self):
         text = "chore(release): update version\nResolves: MTV-9999"
