@@ -7,6 +7,7 @@ from auth.auth import SlackAuth
 from config import config
 from models.dto import (
     JenkinsJobAnalysisDTO,
+    JenkinsJobDTO,
     SlackBuildMessageDTO,
     SlackBuildMessageTSDTO,
 )
@@ -48,9 +49,7 @@ class SlackBuilder:
         block = {"type": "section", "text": {"type": "mrkdwn", "text": text}}
 
         if fields:
-            block["fields"] = [
-                {"type": "mrkdwn", "text": f} for f in fields[:10]
-            ]
+            block["fields"] = [{"type": "mrkdwn", "text": f} for f in fields[:10]]
         self._blocks.append(block)
         return self
 
@@ -129,9 +128,7 @@ class SlackBuilder:
             return el
 
         @staticmethod
-        def link(
-            url: str, text: Optional[str] = None, bold=False
-        ) -> dict[str, Any]:
+        def link(url: str, text: Optional[str] = None, bold=False) -> dict[str, Any]:
             el: dict[str, str | dict] = {"type": "link", "url": url}
             if text:
                 el["text"] = text
@@ -183,6 +180,7 @@ class Slack:
         ocp_versions.rich_text([SB.RichText.section(ocp_lines)])
 
         prev_build = None
+        jira_issues = None
         diff_sections = []
         if msg.prev_build[0]:
             logger.debug("Preparing IIB previous build section")
@@ -196,6 +194,33 @@ class Slack:
                     msg.prev_build[1].split("/")[-1],
                 ]
             )
+
+            logger.debug("Collecting all Jira issues across all origins")
+            seen_issues: set[str] = set()
+            all_issues_elements = []
+            for change in msg.changes:
+                for commit in change.diff:
+                    for issue in commit.issues:
+                        issue_upper = issue.upper()
+                        if issue_upper not in seen_issues:
+                            seen_issues.add(issue_upper)
+                            issue_url = (
+                                f"{config.get_jira_url().rstrip('/')}/browse/{issue_upper}"
+                            )
+                            all_issues_elements.extend(
+                                [
+                                    SB.RichText.link(issue_url, issue_upper),
+                                    SB.RichText.text("\n"),
+                                ]
+                            )
+
+            jira_issues = SB()
+            jira_issues.header("Jira Issues")
+            jira_issues.divider()
+            if all_issues_elements:
+                jira_issues.rich_text([SB.RichText.section(all_issues_elements)])
+            else:
+                jira_issues.section("_No Jira issues found_")
 
             logger.debug("Preparing IIB diff sections")
             for change in msg.changes:
@@ -297,10 +322,10 @@ class Slack:
         try:
             ts = self.send_block(header.build(), self.channel)
             tses.append(ts)
-            tses.append(
-                self.send_block(ocp_versions.build(), self.channel, ts)
-            )
+            tses.append(self.send_block(ocp_versions.build(), self.channel, ts))
             tses.append(self.send_block(prev_build.build(), self.channel, ts))
+            if jira_issues is not None:
+                tses.append(self.send_block(jira_issues.build(), self.channel, ts))
             for ds in diff_sections:
                 tses.append(self.send_block(ds.build(), self.channel, ts))
             tses.append(self.send_block(konflux.build(), self.channel, ts))
@@ -312,14 +337,12 @@ class Slack:
                     self.client.chat_delete(channel=self.channel, ts=ts)
             raise e
 
-        logger.info(f"Sent messages timestamps: {tses}")
+        logger.info({"Sent messages timestamps": f"{tses}"})
         return tses[0]
 
     def send_block(self, blocks: list, channel: str, ts: str = "") -> str:
         if not ts:
-            response = self.client.chat_postMessage(
-                channel=channel, blocks=blocks
-            )
+            response = self.client.chat_postMessage(channel=channel, blocks=blocks)
         else:
             response = self.client.chat_postMessage(
                 channel=channel,
@@ -334,8 +357,14 @@ class Slack:
     def _get_ci_status_emoji(self, status: str) -> str:
         if status.lower() == "failure":
             return ":failed:"
-        else:
+        elif status.lower() == "unstable":
+            return ":yellow-checkmark:"
+        elif status.lower() == "success":
             return ":done-circle-check:"
+        elif status.lower() == "aborted":
+            return ":heavy_multiplication_x:"
+        else:
+            return ":question:"
 
     def _get_user_tags(self, jobs: list[JenkinsJobAnalysisDTO]) -> dict:
         statuses = [job.job_result.result.lower() == "failure" for job in jobs]
@@ -387,21 +416,79 @@ class Slack:
             result = job.job_result.result
             result_emoji = self._get_ci_status_emoji(result)
             analysis_url = job.html_report_url
+            block = {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"{result_emoji} <{job_url}|{job_name} #{build_number}>",
+                },
+            }
+            if analysis_url:
+                block["accessory"] = {
+                    "type": "button",
+                    "text": {
+                        "type": "plain_text",
+                        "text": "Analysis",
+                        "emoji": True,
+                    },
+                    "url": analysis_url,
+                }
+
+            blocks.append(block)
+
+        blocks.append({"type": "divider"})
+        blocks.append(
+            {
+                "type": "context",
+                "elements": [
+                    {
+                        "type": "mrkdwn",
+                        "text": (
+                            ":done-circle-check: Success  |  "
+                            ":yellow-checkmark: Unstable  |  "
+                            ":failed: Failure  |  "
+                            ":heavy_multiplication_x: Aborted  |  "
+                            ":question: Unknown"
+                        ),
+                    }
+                ],
+            }
+        )
+
+        ts = self.send_block(
+            blocks,
+            channel=self.channel,
+            ts=timestamp.timestamp,
+        )
+        logger.info({"CI status slack message TS": ts})
+
+    def send_triggered_jobs(
+        self,
+        jobs: list[JenkinsJobDTO],
+        timestamp: SlackBuildMessageTSDTO,
+    ):
+        blocks = [
+            {
+                "type": "header",
+                "text": {
+                    "type": "plain_text",
+                    "text": "Triggered CI jobs",
+                    "emoji": True,
+                },
+            },
+            {"type": "divider"},
+        ]
+
+        for job in jobs:
+            job_name = job.job_name
+            build_number = job.build_number
+            job_url = job.job_url
             blocks.append(
                 {
                     "type": "section",
                     "text": {
                         "type": "mrkdwn",
-                        "text": f"{result_emoji} <{job_url}|{job_name} #{build_number}>",
-                    },
-                    "accessory": {
-                        "type": "button",
-                        "text": {
-                            "type": "plain_text",
-                            "text": "Analysis",
-                            "emoji": True,
-                        },
-                        "url": analysis_url,
+                        "text": f"<{job_url}|{job_name} #{build_number}>",
                     },
                 }
             )
@@ -411,4 +498,4 @@ class Slack:
             channel=self.channel,
             ts=timestamp.timestamp,
         )
-        print(ts)
+        logger.info({"Triggered CI jobs slack message TS": ts})

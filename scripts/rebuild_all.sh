@@ -24,6 +24,7 @@ oc annotate components/forklift-controller-$version build.appstudio.openshift.io
 oc annotate components/forklift-must-gather-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/forklift-operator-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/forklift-ova-proxy-$version build.appstudio.openshift.io/request=trigger-pac-build
+oc annotate components/hyperv-provider-server-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/openstack-populator-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/ova-provider-server-$version build.appstudio.openshift.io/request=trigger-pac-build
 oc annotate components/ovirt-populator-$version build.appstudio.openshift.io/request=trigger-pac-build

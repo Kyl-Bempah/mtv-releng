@@ -32,15 +32,20 @@ class Git:
         except git.GitCommandError as e:
             raise RuntimeError(f"Error pulling changes: {e}")
 
-    def push(self, branch: str = "main", remote_name: str = "origin") -> None:
+    def push(
+        self,
+        branch: str = "main",
+        remote_name: str = "origin",
+        push_options: list[str] | None = None,
+    ) -> None:
         self._ensure_repo()
         try:
-            remote = self.repo.remote(name=remote_name)
-            logger.info(f"Pushing to {remote}/{branch}...")
-            remote.push(refspec=f"{branch}:{branch}")
+            args = [remote_name, f"{branch}:{branch}"]
+            for opt in push_options or []:
+                args.extend(["-o", opt])
+            logger.info(f"Pushing to {remote_name}/{branch}...")
+            self.repo.git.push(*args)
             logger.info("Push successful")
-        except ValueError:
-            raise RuntimeError(f"Remote {remote_name} not found")
         except git.GitCommandError as e:
             raise RuntimeError(f"Error pushing changes: {e}")
 

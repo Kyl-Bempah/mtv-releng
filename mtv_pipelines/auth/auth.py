@@ -10,6 +10,7 @@ REGISTRY_STAGE_USER = "REGISTRY_STAGE_USER"
 REGISTRY_STAGE_TOKEN = "REGISTRY_STAGE_TOKEN"
 STORAGE_OFFLOAD_CLUSTER = "STORAGE_OFFLOAD_CLUSTER"
 GITHUB_TOKEN = "GH_TOKEN"
+ROOTCOZ_TOKEN = "ROOTCOZ"
 
 
 @dataclass
@@ -38,3 +39,12 @@ class JenkinsAuth:
 class StorageOffloadClusterAuth:
     def __init__(self):
         self.passwd = Auth(STORAGE_OFFLOAD_CLUSTER).value
+
+
+class RootcozAuth:
+    def __init__(self):
+        self.token = Auth(ROOTCOZ_TOKEN).value
+
+    @property
+    def bearer_header(self) -> str:
+        return f"Bearer {self.token}"

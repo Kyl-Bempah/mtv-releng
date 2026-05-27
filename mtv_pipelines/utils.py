@@ -1,15 +1,21 @@
 import logging
 import re
+import shutil
 import tempfile
+from typing import TYPE_CHECKING
 
 from config.config import (
     get_allowed_project_keys,
     get_cmp_mappings,
     get_dev_preview_namespace,
+    get_mtv_versions,
     get_release_namespace,
 )
 from models.iib import IIB
 from semver import Version
+
+if TYPE_CHECKING:
+    from models.dto import JenkinsJobDTO
 
 PRETTY_PRINT = "  "
 
@@ -24,12 +30,22 @@ def iib_short_for_target_ocp(iib_short: str, ocp_version: str) -> str:
     compact = f"v{stripped.replace('.', '')}"
     replaced, n = _FBC_PROD_OCP_INFIX.subn(rf"\g<1>{compact}", iib_short, count=1)
     return replaced if n else iib_short
+_temp_dirs: list[str] = []
 
 
-def create_temp_dir(suffix: str = "") -> tempfile.TemporaryDirectory:
+def create_temp_dir(suffix: str = "") -> str:
     if suffix:
         suffix = f"_{suffix}"
-    return tempfile.TemporaryDirectory(suffix)
+    path = tempfile.mkdtemp(suffix=suffix)
+    _temp_dirs.append(path)
+    return path
+
+
+def cleanup_temp_dirs():
+    for path in _temp_dirs:
+        shutil.rmtree(path, ignore_errors=True)
+        logger.debug("Cleaned up temp dir: %s", path)
+    _temp_dirs.clear()
 
 
 def replace_for_quay(image: str, version: Version) -> str:
@@ -141,4 +157,15 @@ def extract_jira_keys(text: str) -> list[str]:
         if key.upper().split("-")[0] in allowed_keys:
             keys.append(key.upper())
 
-    return keys
+    return list(set(keys))
+
+
+def forklift_branch_from_jenkins_job(job: "JenkinsJobDTO") -> str:
+    ver = Version.parse(job.iib_version)
+    xy = [str(ver.major), str(ver.minor)]
+    for branch, branch_ver in get_mtv_versions().items():
+        if branch_ver.split(".")[:2] == xy:
+            return branch
+    raise ValueError(
+        f"No forklift branch found for IIB version {job.iib_version}"
+    )

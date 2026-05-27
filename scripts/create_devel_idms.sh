@@ -45,6 +45,10 @@ spec:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-console-plugin-${version}
       source: registry.redhat.io/${repo}/mtv-console-plugin-rhel9
     - mirrors:
+        - registry.stage.redhat.io/${repo}/mtv-hyperv-provider-server-rhel9
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/hyperv-provider-server-${version}
+      source: registry.redhat.io/${repo}/mtv-hyperv-provider-server-rhel9
+    - mirrors:
         - registry.stage.redhat.io/${repo}/mtv-validation-rhel9
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/validation-${version}
       source: registry.redhat.io/${repo}/mtv-validation-rhel9
@@ -94,6 +98,14 @@ spec:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-operator-bundle-${version}
       source: registry.redhat.io/${repo}/mtv-operator-bundle
     - mirrors:
+        - registry.stage.redhat.io/${repo}/mtv-deep-inspection-rhel10
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/deep-inspection-${version}
+      source: registry.redhat.io/${repo}/mtv-deep-inspection-rhel10
+    - mirrors:
+        - registry.stage.redhat.io/${repo}/mtv-deep-inspection-rhel9
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/deep-inspection-rhel9-${version}
+      source: registry.redhat.io/${repo}/mtv-deep-inspection-rhel9
+    - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-controller-${version}
       source: registry.stage.redhat.io/${repo}/mtv-controller-rhel9
     - mirrors:
@@ -108,6 +120,9 @@ spec:
     - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-console-plugin-${version}
       source: registry.stage.redhat.io/${repo}/mtv-console-plugin-rhel9
+    - mirrors:
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/hyperv-provider-server-${version}
+      source: registry.stage.redhat.io/${repo}/mtv-hyperv-provider-server-rhel9
     - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/validation-${version}
       source: registry.stage.redhat.io/${repo}/mtv-validation-rhel9
@@ -144,6 +159,12 @@ spec:
     - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-ova-proxy-${version}
       source: registry.stage.redhat.io/${repo}/mtv-ova-proxy-rhel9
+    - mirrors:
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/deep-inspection-${version}
+      source: registry.stage.redhat.io/${repo}/mtv-deep-inspection-rhel10
+    - mirrors:
+        - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/deep-inspection-rhel9-${version}
+      source: registry.stage.redhat.io/${repo}/mtv-deep-inspection-rhel9
 
 EOF
 

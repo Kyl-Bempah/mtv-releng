@@ -32,6 +32,8 @@ from wrappers.jenkins import JenkinsManager
 from wrappers.jenkins_analyzer import JenkinsAnalyzer
 from wrappers.slack import Slack
 
+from mtv_pipelines.wrappers.skopeo import Skopeo
+
 DESCRIPTION = "Pipeline to process IIB from FBC PR"
 
 
@@ -70,6 +72,18 @@ def arg_parse(arg_parser):
 
 
 @task
+async def skopeo_login_task(
+    data: EmptyDTO, args: Namespace, tg: TaskGroup
+) -> EmptyDTO:
+    try:
+        Skopeo().auth()
+    except RuntimeError as e:
+        logger.error(f"Failed to login to registries: {e}")
+        raise e
+    return EmptyDTO()
+
+
+@task
 async def prepare_fbc_repo(
     data: EmptyDTO, args: Namespace, tg: TaskGroup
 ) -> FBCRepo:
@@ -80,6 +94,8 @@ async def prepare_fbc_repo(
     fbc_repo.git.checkout(fbc_repo.target)
     fbc_repo.git.config("user.email", config.get_git_email())
     fbc_repo.git.config("user.name", config.get_git_name())
+
+    GHCLI(fbc_repo.tmp_dir.name).auth()
 
     # Download OPM tool, offload downloading to threads
     fbc_repo.download_opm()
@@ -378,24 +394,24 @@ async def extract_commit_diff(
 @depends_on(extract_commit_diff, process_pull_request)
 async def send_slack_build_msg(
     data: CollectorDTO, args: Namespace, tg: TaskGroup
-) -> dict[str, str]:
+) -> SlackBuildMessageTSDTO:
     if not data:
         logger.warning(f"Previous task didn't return any data")
-        return {}
+        return EmptyDTO()
 
     if not data.task_outputs.get(extract_commit_diff.name):
         logger.warning(f"Previous task didn't return any commit diff")
-        return {}
+        return EmptyDTO()
 
     if not data.task_outputs.get(process_pull_request.name):
         logger.warning(f"Previous task didn't return any FBC repos")
-        return {}
+        return EmptyDTO()
 
     if args.skip_slack:
         logger.info(
             "Skipping sending of slack message as --skip-slack arg was provided"
         )
-        return {}
+        return EmptyDTO()
 
     result = {}
     fbc_repo = data.task_outputs[process_pull_request.name]
@@ -403,8 +419,9 @@ async def send_slack_build_msg(
         fbc_repo, data.task_outputs[extract_commit_diff.name]
     )
     ts = Slack().send_build(b)
-    result[str(fbc_repo.current_iib_version)] = ts
-    return result
+    return SlackBuildMessageTSDTO(
+        iib_version=str(fbc_repo.current_iib_version), timestamp=ts
+    )
 
 
 @task
@@ -441,12 +458,17 @@ async def trigger_jenkins_jobs(
             iib_short_for_target_ocp(iib_short, ocps[0]),
         )
         if job:
+            job_url_coro = await jm.get_job_info(
+                job["job_name"], job["job_number"]
+            )
+            job_url = job_url_coro.get("url", "")
             results.append(
                 JenkinsJobDTO(
                     iib_version=iib_version,
                     job_name=job["job_name"],
                     build_number=job["job_number"],
                     ocp_version=ocps[0],
+                    job_url=job_url,
                 )
             )
         job = await jm.trigger_release_non_gate(
@@ -455,12 +477,17 @@ async def trigger_jenkins_jobs(
             iib_short_for_target_ocp(iib_short, ocps[1]),
         )
         if job:
+            job_url_coro = await jm.get_job_info(
+                job["job_name"], job["job_number"]
+            )
+            job_url = job_url_coro.get("url", "")
             results.append(
                 JenkinsJobDTO(
                     iib_version=iib_version,
                     job_name=job["job_name"],
                     build_number=job["job_number"],
                     ocp_version=ocps[1],
+                    job_url=job_url,
                 )
             )
         # Limit to 2.11 on 4.20
@@ -470,19 +497,69 @@ async def trigger_jenkins_jobs(
                 iib_short_for_target_ocp(iib_short, "v4.20"),
             )
             if job:
+                job_url_coro = await jm.get_job_info(
+                    job["job_name"], job["job_number"]
+                )
+                job_url = job_url_coro.get("url", "")
                 results.append(
                     JenkinsJobDTO(
                         iib_version=iib_version,
                         job_name=job["job_name"],
                         build_number=job["job_number"],
                         ocp_version="v4.20",
+                        job_url=job_url,
                     )
                 )
+
+        # Trigger UI testing on UI cluster for supported MTV versions
+        job = await jm.trigger_ui_testing(version, ocps, iib_short)
+        if job:
+            job_url_coro = await jm.get_job_info(
+                job["job_name"], job["job_number"]
+            )
+            job_url = job_url_coro.get("url", "")
+            results.append(
+                JenkinsJobDTO(
+                    iib_version=iib_version,
+                    job_name=job["job_name"],
+                    build_number=job["job_number"],
+                    ocp_version=job["target_ocp"],
+                    job_url=job_url,
+                )
+            )
     except requests.exceptions.ConnectionError as ex:
         logger.error("Couldn't trigger jenkins CI jobs due to network issues")
         logger.exception(ex)
         return []
     return results
+
+
+@task
+@depends_on(trigger_jenkins_jobs, send_slack_build_msg)
+async def send_triggered_jobs_slack_message(
+    data: CollectorDTO, args: Namespace, tg: TaskGroup
+) -> EmptyDTO:
+    if not data:
+        logger.warning(
+            f"Previous task didn't return any Jenkins jobs or slack build messages"
+        )
+        return EmptyDTO()
+
+    jobs = data.task_outputs.get(trigger_jenkins_jobs.name)
+    if not jobs:
+        logger.warning(f"Previous task didn't return any Jenkins jobs")
+        return EmptyDTO()
+    ts = data.task_outputs.get(send_slack_build_msg.name)
+    if not ts:
+        logger.warning(
+            f"Previous task didn't return any slack build message timestamps"
+        )
+        return EmptyDTO()
+
+    s = Slack()
+    s.send_triggered_jobs(jobs, ts)
+
+    return EmptyDTO()
 
 
 @task
@@ -558,19 +635,7 @@ async def send_slack_ci_msg(
         )
         return {}
 
-    ts_ver_map: dict[str, list[JenkinsJobAnalysisDTO]] = {}
-    jobs: list[JenkinsJobAnalysisDTO] = data.task_outputs[analyze_jobs.name]
-    timestamps: list[SlackBuildMessageTSDTO] = data.task_outputs[
-        send_slack_build_msg.name
-    ]
-    for job in jobs:
-        j_ver = job.job_result.job.iib_version
-        if not ts_ver_map.get(j_ver, []):
-            ts_ver_map[j_ver] = [job]
-
-    for ts in timestamps:
-        job_analyses = ts_ver_map.get(ts.iib_version, [])
-        if not job_analyses:
-            continue
-        s = Slack()
-        s.send_ci_status(jobs, ts)
+    jobs = data.task_outputs[analyze_jobs.name]
+    timestamp = data.task_outputs[send_slack_build_msg.name]
+    s = Slack()
+    s.send_ci_status(jobs, timestamp)

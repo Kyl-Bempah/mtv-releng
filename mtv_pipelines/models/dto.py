@@ -170,6 +170,7 @@ class JenkinsJobDTO(BaseModel):
     job_name: str
     build_number: int
     ocp_version: str
+    job_url: str
 
 
 class JenkinsJobResultDTO(BaseModel):
@@ -195,3 +196,13 @@ class JenkinsJobAnalysisDTO(BaseModel):
 class JenkinsJobResultToBuildTSDTO(BaseModel):
     jobs: list[JenkinsJobResultDTO]
     timestamp: SlackBuildMessageTSDTO
+
+
+class ReversionResultDTO(BaseModel):
+    origin: str
+    branch: str
+    old_version: str
+    new_version: str
+    pr_url: str = ""
+    skipped: bool = False
+    skip_reason: str = ""
