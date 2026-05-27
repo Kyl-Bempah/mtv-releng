@@ -72,9 +72,7 @@ def arg_parse(arg_parser):
 
 
 @task
-async def skopeo_login_task(
-    data: EmptyDTO, args: Namespace, tg: TaskGroup
-) -> EmptyDTO:
+async def skopeo_login_task(data: EmptyDTO, args: Namespace, tg: TaskGroup) -> EmptyDTO:
     try:
         Skopeo().auth()
     except RuntimeError as e:
@@ -132,9 +130,7 @@ async def get_latest_stage_bundles(
         bundles.append(b)
         return bundles
 
-    for cmp, branch_vers in [
-        (rv.repo, rv.branch_versions) for rv in data.versions
-    ]:
+    for cmp, branch_vers in [(rv.repo, rv.branch_versions) for rv in data.versions]:
         # Bundles are in forklift repo so skip others
         if cmp != "forklift":
             continue
@@ -156,7 +152,9 @@ async def get_latest_stage_bundles(
                 reg = config.get_dev_preview_namespace()
             else:
                 reg = config.get_release_namespace()
-            url = f"registry.stage.redhat.io/{reg}/mtv-operator-bundle:{ver.to_version()}"
+            url = (
+                f"registry.stage.redhat.io/{reg}/mtv-operator-bundle:{ver.to_version()}"
+            )
 
             b = Bundle(url)
 
@@ -207,9 +205,7 @@ async def prepare_fbc_repo(
         # Check if remote branch for MTV version already exists
         remote_branches = fbc_repo.git.remote_branches()
         remote_branch_exists = False
-        logger.info(
-            f"Checking if remote branch for MTV {bundle.version} exists"
-        )
+        logger.info(f"Checking if remote branch for MTV {bundle.version} exists")
         for branch in remote_branches:
             if str(bundle.version) in branch:
                 remote_branch_exists = True
@@ -272,9 +268,7 @@ async def process_pull_request(
             try:
                 pr_url = GHCLI(fbc_repo.tmp_dir.name).create_pr(ver)
                 fbc_repo.pr_url = pr_url
-                logger.info(
-                    f"Found PR {pr_url} for {fbc_repo.for_bundle.version}"
-                )
+                logger.info(f"Found PR {pr_url} for {fbc_repo.for_bundle.version}")
             except RuntimeError as e:
                 logger.exception(e)
                 return []
@@ -282,9 +276,7 @@ async def process_pull_request(
             if len(prs) > 1:
                 logger.error(f"Found multiple PRs for {ver}, skipping version")
             fbc_repo.pr_url = prs[0]["url"]
-            logger.info(
-                f"Found PR {prs[0]["url"]} for {fbc_repo.for_bundle.version}"
-            )
+            logger.info(f"Found PR {prs[0]['url']} for {fbc_repo.for_bundle.version}")
     return data
 
 
@@ -304,13 +296,9 @@ async def wait_for_prs(
     tasks = []
     for fbc_repo in data:
         if not fbc_repo.pr_url:
-            logger.error(
-                f"FBC for {fbc_repo.for_bundle.version} didn't have PR URL"
-            )
+            logger.error(f"FBC for {fbc_repo.for_bundle.version} didn't have PR URL")
             continue
-        logger.info(
-            f"Waiting for builds in the PR {fbc_repo.pr_url} to finish"
-        )
+        logger.info(f"Waiting for builds in the PR {fbc_repo.pr_url} to finish")
         tasks.append(tg.create_task(wait_for_pr(fbc_repo)))
 
     results: list[FBCRepo] = []
@@ -470,15 +458,11 @@ async def extract_commit_diff(
     git_repos = data.task_outputs.get(prepare_cmp_git_repos.name)
     results = []
 
-    def find_git_repo_for_ver(
-        git_repos: list[GitRepo], repo: str, ver: str
-    ) -> GitRepo:
+    def find_git_repo_for_ver(git_repos: list[GitRepo], repo: str, ver: str) -> GitRepo:
         for gr in git_repos:
             if gr.name != repo:
                 continue
-            if ".".join(gr.version.split(".")[:2]) != ".".join(
-                ver.split(".")[:2]
-            ):
+            if ".".join(gr.version.split(".")[:2]) != ".".join(ver.split(".")[:2]):
                 continue
             return gr
         raise ValueError(f"No git repo found for {repo} {ver}")
@@ -548,9 +532,7 @@ async def send_slack_build_msg(
 
     result = []
     for fbc_repo in data.task_outputs[wait_for_prs.name]:
-        b = prepare_slack_build(
-            fbc_repo, data.task_outputs[extract_commit_diff.name]
-        )
+        b = prepare_slack_build(fbc_repo, data.task_outputs[extract_commit_diff.name])
         ts = Slack().send_build(b)
         result.append(
             SlackBuildMessageTSDTO(
@@ -566,9 +548,7 @@ async def trigger_jenkins_jobs(
     data: list[FBCRepo], args: Namespace, tg: TaskGroup
 ) -> list[JenkinsJobDTO]:
     if args.skip_jenkins:
-        logger.info(
-            "Skipping jenkins triggers as --skip-jenkins arg was provided"
-        )
+        logger.info("Skipping jenkins triggers as --skip-jenkins arg was provided")
         return []
     if not data:
         logger.warning(f"Previous task didn't return any FBC repos")
@@ -594,9 +574,7 @@ async def trigger_jenkins_jobs(
                 iib_short_for_target_ocp(iib_short, ocps[0]),
             )
             if job:
-                job_url_coro = await jm.get_job_info(
-                    job["job_name"], job["job_number"]
-                )
+                job_url_coro = await jm.get_job_info(job["job_name"], job["job_number"])
                 job_url = job_url_coro.get("url", "")
                 results.append(
                     JenkinsJobDTO(
@@ -608,14 +586,12 @@ async def trigger_jenkins_jobs(
                     )
                 )
             job = await jm.trigger_release_non_gate(
-                version, 
-                ocps[1], 
+                version,
+                ocps[1],
                 iib_short_for_target_ocp(iib_short, ocps[1]),
             )
             if job:
-                job_url_coro = await jm.get_job_info(
-                    job["job_name"], job["job_number"]
-                )
+                job_url_coro = await jm.get_job_info(job["job_name"], job["job_number"])
                 job_url = job_url_coro.get("url", "")
                 results.append(
                     JenkinsJobDTO(
@@ -631,11 +607,11 @@ async def trigger_jenkins_jobs(
             clusters = config.get_storage_offload_clusters()
             if mtv_xy in clusters:
                 cluster_cfg = clusters[mtv_xy]
-                storage_ocp = f'v{str(cluster_cfg["ocp_version"]).replace("v", "")}'
+                storage_ocp = f"v{str(cluster_cfg['ocp_version']).replace('v', '')}"
 
                 job = await jm.trigger_storage_offload(
                     version,
-                    iib_short_for_target_ocp(iib_short, str(cluster_cfg["ocp_version"])),
+                    iib_short_for_target_ocp(iib_short, storage_ocp),
                 )
 
                 if job:
@@ -656,9 +632,7 @@ async def trigger_jenkins_jobs(
             # Trigger UI testing on UI cluster for supported MTV versions
             job = await jm.trigger_ui_testing(version, ocps, iib_short)
             if job:
-                job_url_coro = await jm.get_job_info(
-                    job["job_name"], job["job_number"]
-                )
+                job_url_coro = await jm.get_job_info(job["job_name"], job["job_number"])
                 job_url = job_url_coro.get("url", "")
                 results.append(
                     JenkinsJobDTO(
@@ -775,9 +749,7 @@ async def analyze_jobs(
 
 @task
 @depends_on(analyze_jobs, send_slack_build_msg)
-async def send_slack_ci_msg(
-    data: CollectorDTO, args: Namespace, tg: TaskGroup
-):
+async def send_slack_ci_msg(data: CollectorDTO, args: Namespace, tg: TaskGroup):
     if not data:
         logger.warning(
             f"Previous task didn't return any Jenkins jobs or slack build messages"
