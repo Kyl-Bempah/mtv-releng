@@ -79,7 +79,7 @@ class JenkinsAnalyzer:
                 continue
             try:
                 bn = int(child.get("build_number") or 0)
-            except TypeError, ValueError:
+            except (TypeError, ValueError):
                 bn = 0
             children.append(
                 JenkinsChildJobAnalysisDTO(
