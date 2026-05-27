@@ -1,15 +1,22 @@
-IMAGE_NAME := "mtv_pipelines"
-WORKDIR    := "app"
-NETWORK    := "mtv-dashboard"
+IMAGE_NAME      := "mtv_pipelines"
+TEST_IMAGE_NAME := "mtv_pipelines_test"
+WORKDIR         := "app"
+NETWORK         := "mtv-dashboard"
 
-.PHONY: update network test build shell dev run
+.PHONY: update network test-image test test-local build shell dev run
 update:
 	poetry install --with dev
 
 network:
 	podman network exists $(NETWORK) || podman network create $(NETWORK)
 
-test: update
+test-image:
+	podman build -t $(TEST_IMAGE_NAME) -f Containerfile.test .
+
+test: test-image
+	podman run --rm $(TEST_IMAGE_NAME)
+
+test-local: update
 	poetry run pytest
 
 build: test
