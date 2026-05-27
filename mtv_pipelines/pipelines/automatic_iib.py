@@ -30,7 +30,7 @@ from tasks.get_mtv_versions import get_mtv_versions
 from tasks.prepare_slack_build import prepare_slack_build
 from tasks.process_fbc_repo import process_fbc_repo
 from tasks.wait_for_pr import wait_for_pr
-from utils import replace_for_quay
+from utils import iib_short_for_target_ocp, replace_for_quay
 from wrappers.gh_cli import GHCLI
 from wrappers.jenkins import JenkinsManager
 from wrappers.jenkins_analyzer import JenkinsAnalyzer
@@ -588,7 +588,11 @@ async def trigger_jenkins_jobs(
             ocps.reverse()
             version = str(fbc_repo.for_bundle.version)
 
-            job = await jm.trigger_release_gate(version, ocps[0], iib_short)
+            job = await jm.trigger_release_gate(
+                version,
+                ocps[0],
+                iib_short_for_target_ocp(iib_short, ocps[0]),
+            )
             if job:
                 job_url_coro = await jm.get_job_info(
                     job["job_name"], job["job_number"]
@@ -604,7 +608,9 @@ async def trigger_jenkins_jobs(
                     )
                 )
             job = await jm.trigger_release_non_gate(
-                version, ocps[1], iib_short
+                version, 
+                ocps[1], 
+                iib_short_for_target_ocp(iib_short, ocps[1]),
             )
             if job:
                 job_url_coro = await jm.get_job_info(
@@ -622,11 +628,15 @@ async def trigger_jenkins_jobs(
                 )
             # Limit to 2.11 on 4.20
             if "2.11" in version:
-                job = await jm.trigger_storage_offload(version, iib_short)
+                job = await jm.trigger_storage_offload(
+                    version,
+                    iib_short_for_target_ocp(iib_short, "v4.20"),
+                )
                 job_url_coro = await jm.get_job_info(
                     job["job_name"], job["job_number"]
                 )
                 job_url = job_url_coro.get("url", "")
+
                 if job:
                     results.append(
                         JenkinsJobDTO(
