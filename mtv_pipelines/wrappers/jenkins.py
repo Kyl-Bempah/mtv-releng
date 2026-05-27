@@ -2,7 +2,11 @@ import logging
 import time
 
 import jenkins
-from auth.auth import JenkinsAuth, StorageOffloadClusterAuth
+from auth.auth import (
+    STORAGE_OFFLOAD_CLUSTER_EDGE112,
+    JenkinsAuth,
+    StorageOffloadClusterAuth,
+)
 from config import config
 from models.dto import JenkinsJobDTO
 
@@ -100,12 +104,23 @@ class JenkinsManager:
     def get_storage_offload_args(
         self, mtv_version: str, ocp_version: str, iib: str
     ):
+        mtv_xy = ".".join(mtv_version.split(".")[:2])
+        cluster_cfg = config.get_storage_offload_clusters().get(mtv_xy)
+        if not cluster_cfg:
+            logger.warning(
+                f"MTV {mtv_xy} not in storage_offload_clusters; "
+                "skipping storage offload args"
+            )
+            return {}
+        password_env = cluster_cfg.get(
+            "password_env", STORAGE_OFFLOAD_CLUSTER_EDGE112
+        )
         return {
             "USE_USER_CLUSTER_CREDENTIALS": True,
-            "CUSTOM_CLUSTER_NAME": "ocp-edge112",
-            "OCP_API_URL": "https://api.ocp-edge112-0.lab.eng.tlv2.redhat.com:6443",
+            "CUSTOM_CLUSTER_NAME": cluster_cfg["custom_cluster_name"],
+            "OCP_API_URL": cluster_cfg["ocp_api_url"],
             "OCP_USERNAME": "kubeadmin",
-            "OCP_PASSWORD": StorageOffloadClusterAuth().passwd,
+            "OCP_PASSWORD": StorageOffloadClusterAuth(password_env).passwd,
             "OCP_VERSION": ocp_version,
             "DEPLOY_MTV": True,
             "IIB_NO": iib,
@@ -243,12 +258,19 @@ class JenkinsManager:
             return {}
 
     async def trigger_storage_offload(
-        self, mtv_version: str, iib: str, ocp_version: str = "v4.20"
+        self, mtv_version: str, iib: str
     ):
         mtv_xy = ".".join(mtv_version.split(".")[:2])
+        cluster_cfg = config.get_storage_offload_clusters().get(mtv_xy, {})
+        ocp_version = cluster_cfg.get("ocp_version")
+        if not ocp_version:
+            logger.error(
+                f"Missing ocp_version for MTV {mtv_xy} in storage_offload_clusters"
+            )
+            return {}
         ocp_wv = ocp_version.replace("v", "")
 
-        ci_args = self.get_storage_offload_args(mtv_version, ocp_version, iib)
+        ci_args = self.get_storage_offload_args(mtv_version, ocp_wv, iib)
         if not ci_args:
             logger.warning(
                 f"Missing arguments, can't trigger a job for {ocp_version}/{mtv_version}"

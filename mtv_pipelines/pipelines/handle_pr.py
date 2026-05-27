@@ -490,12 +490,18 @@ async def trigger_jenkins_jobs(
                     job_url=job_url,
                 )
             )
-        # Limit to 2.11 on 4.20
-        if "2.11" in version:
+
+        mtv_xy = ".".join(version.split(".")[:2])
+        clusters = config.get_storage_offload_clusters()
+        if mtv_xy in clusters:
+            cluster_cfg = clusters[mtv_xy]
+            storage_ocp = f'v{str(cluster_cfg["ocp_version"]).replace("v", "")}'
+
             job = await jm.trigger_storage_offload(
                 version,
                 iib_short_for_target_ocp(iib_short, "v4.20"),
             )
+
             if job:
                 job_url_coro = await jm.get_job_info(
                     job["job_name"], job["job_number"]
@@ -506,7 +512,7 @@ async def trigger_jenkins_jobs(
                         iib_version=iib_version,
                         job_name=job["job_name"],
                         build_number=job["job_number"],
-                        ocp_version="v4.20",
+                        ocp_version=storage_ocp,
                         job_url=job_url,
                     )
                 )
