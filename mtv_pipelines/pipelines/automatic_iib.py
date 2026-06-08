@@ -782,8 +782,9 @@ async def analyze_jobs(
 
     results = []
     for job in data:
-        if "offload" in job.job.job_name:
-            continue
+        # Temporarily enable analysis of offload jobs
+        # if "offload" in job.job.job_name:
+        #     continue
         ja = JenkinsAnalyzer()
         results.append(ja.analyze_job(job))
 
