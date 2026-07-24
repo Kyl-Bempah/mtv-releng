@@ -95,8 +95,8 @@ class Bundle:
                 low_ver = ocps.split("-")[0].lstrip("v")
                 high_ver = ocps.split("-")[1].lstrip("v")
 
-                low_version = Version.parse(low_ver)
-                high_version = Version.parse(high_ver)
+                low_version = Version.parse(low_ver, optional_minor_and_patch=True)
+                high_version = Version.parse(high_ver, optional_minor_and_patch=True)
 
                 # Validation: Ensure low <= high
                 if low_version > high_version:
