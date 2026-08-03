@@ -78,7 +78,8 @@ log "Found $ocp_label OCP version for processing..."
 # example for "v4.18-v4.20" label
 start_version=${ocp_label%-*} # result: v4.18
 end_version=${ocp_label#*-} # result: v4.20
-prefix=${start_version%.*} # result: v4
+start_prefix=${start_version%.*} # result: v4
+end_prefix=${end_version%.*} # result: generally v4 but may be v5 on major upgrade
 start_number=${start_version##*.} # result: 18
 end_number=${end_version##*.} # result: 20
 
@@ -89,9 +90,56 @@ log "Found operator target channel: $channel..."
 
 declare -a versions
 
-for ((i=start_number; i<=end_number; i++)); do
-  versions+=("$prefix.$i")
-done
+# check if cross-major version range
+
+if [[ "$start_prefix" == "$end_prefix" ]]; then
+  # same major version - use existing logic
+  for ((i=start_number; i<=end_number; i++)); do
+    versions+=("$start_prefix.$i")
+  done
+else
+  # cross-major version range - scan available versions
+  start_major=${start_prefix#v}
+  end_major=${end_prefix#v}
+
+  # read available versions from cluster mappings
+  config_file="$(dirname $0)/../mtv_pipelines/config/config.yaml"
+  available_versions=$(grep -A 20 "cluster_mappings:" "$config_file" | \
+    grep '"[0-9]\+\.[0-9]\+"' | \
+    grep -v '"none"' | \
+    sed 's/.*"\([0-9]\+\.[0-9]\+\)".*/\1/')
+
+  # scan major versions from start to end
+  for ((major=start_major; major<=end_major; major++)); do
+    # determine minor range for current major
+    if [[ $major == $start_major ]]; then
+      min_minor=$start_number
+    else
+      min_minor=0
+    fi
+
+    if [[ $major == $end_major ]]; then
+      max_minor=$end_number
+    else
+      max_minor=50 # safety limit
+    fi
+
+    # scan minor versions in current major
+    for ((minor=min_minor; minor<=max_minor; minor++)); do
+      version_str="${major}.${minor}"
+
+      # always include endpoint versions or check availability
+      if [[ ($major == $start_major && $minor == $start_number) || \
+            ($major == $end_major && $minor == $end_number) ]] || \
+         echo "$available_versions" | grep -q "^${version_str}$"; then
+        versions+=("v${version_str}")
+      fi
+
+      # stop if we reached the end version
+      [[ $major == $end_major && $minor == $end_number ]] && break
+    done
+  done
+fi
 
 # check if branch for MTV version exists, if not create it
 if [[ -n $(git branch -a | grep remotes/origin/$version) ]]; then
