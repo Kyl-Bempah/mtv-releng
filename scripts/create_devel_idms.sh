@@ -37,9 +37,9 @@ spec:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-api-${version}
       source: registry.redhat.io/${repo}/mtv-api-rhel9
     - mirrors:
-        - registry.stage.redhat.io/${repo}/mtv-must-gather-rhel8
+        - registry.stage.redhat.io/${repo}/mtv-must-gather-rhel9
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-must-gather-${version}
-      source: registry.redhat.io/${repo}/mtv-must-gather-rhel8
+      source: registry.redhat.io/${repo}/mtv-must-gather-rhel9
     - mirrors:
         - registry.stage.redhat.io/${repo}/mtv-console-plugin-rhel9
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-console-plugin-${version}
@@ -116,7 +116,7 @@ spec:
       source: registry.stage.redhat.io/${repo}/mtv-api-rhel9
     - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-must-gather-${version}
-      source: registry.stage.redhat.io/${repo}/mtv-must-gather-rhel8
+      source: registry.stage.redhat.io/${repo}/mtv-must-gather-rhel9
     - mirrors:
         - quay.io/redhat-user-workloads/rh-mtv-1-tenant/forklift-operator-${version}/forklift-console-plugin-${version}
       source: registry.stage.redhat.io/${repo}/mtv-console-plugin-rhel9

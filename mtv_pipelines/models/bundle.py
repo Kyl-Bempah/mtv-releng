@@ -90,11 +90,63 @@ class Bundle:
         # https://redhat-connect.gitbook.io/certified-operator-guide/ocp-deployment/operator-metadata/bundle-directory/managing-openshift-versions
         if "-" in ocps:
             try:
-                low_x, low_y = ocps.split("-")[0].lstrip("v").split(".")
-                high_x, high_y = ocps.split("-")[1].lstrip("v").split(".")
-                for x in range(int(low_x), int(high_x) + 1):
-                    for y in range(int(low_y), int(high_y) + 1):
-                        self.ocps.append(f"v{x}.{y}")
+                from config.config import get_cluster_mappings
+
+                low_ver = ocps.split("-")[0].lstrip("v")
+                high_ver = ocps.split("-")[1].lstrip("v")
+
+                low_version = Version.parse(low_ver, optional_minor_and_patch=True)
+                high_version = Version.parse(high_ver, optional_minor_and_patch=True)
+
+                # Validation: Ensure low <= high
+                if low_version > high_version:
+                    raise ValueError(f"Invalid range: {low_ver} > {high_ver}")
+
+                # Get available OCP versions from cluster mappings
+                cluster_mappings = get_cluster_mappings()
+                available_versions = {v for v in cluster_mappings.keys()
+                                    if v != "none" and cluster_mappings[v] != "none"}
+
+                def is_version_available(version_str):
+                    """Check if a version is available in cluster mappings"""
+                    return version_str in available_versions
+
+                # Generate list by discovering all available intermediate versions
+                valid_versions = []
+                current_major = low_version.major
+
+                while current_major <= high_version.major:
+                    # Determine minor version range for current major
+                    if current_major == low_version.major:
+                        start_minor = low_version.minor
+                    else:
+                        start_minor = 0
+
+                    if current_major == high_version.major:
+                        end_minor = high_version.minor
+                    else:
+                        # For intermediate majors, scan up to a reasonable limit
+                        end_minor = 50  # Safety limit to prevent runaway
+
+                    # Scan all minor versions within this major
+                    for minor in range(start_minor, end_minor + 1):
+                        version_str = f"{current_major}.{minor}"
+
+                        # Always include endpoint versions, even if not in cluster mappings
+                        is_endpoint = (current_major == low_version.major and minor == low_version.minor) or \
+                                    (current_major == high_version.major and minor == high_version.minor)
+
+                        if is_endpoint or is_version_available(version_str):
+                            valid_versions.append(f"v{version_str}")
+
+                        # Stop if we've reached the high version
+                        if current_major == high_version.major and minor >= high_version.minor:
+                            break
+
+                    current_major += 1
+
+                # Sort by semantic version to ensure proper ordering
+                self.ocps = sorted(valid_versions, key=lambda x: Version.parse(x.lstrip("v")))
             except Exception:
                 raise RuntimeError(
                     f"Couldn't parse {ocps} in individual versions"
