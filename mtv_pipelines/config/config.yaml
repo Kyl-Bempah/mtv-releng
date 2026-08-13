@@ -173,6 +173,10 @@ cmp_mappings:
     upstream: "forklift-must-gather"
     origin: "forklift-must-gather"
 
+  mtv-must-gather-rhel8:
+    upstream: "forklift-must-gather"
+    origin: "forklift-must-gather"
+
   mtv-validation-rhel9:
     upstream: "validation"
     origin: "forklift"
