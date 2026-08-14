@@ -123,6 +123,12 @@ def get_cluster_mappings() -> dict:
     return _parse_simple("cluster_mappings")
 
 
+def get_upgrade_from_versions() -> dict:
+    # Optional: overrides the computed upgrade-from version for releases where
+    # it can't be derived (e.g. major cutovers like 5.0 -> from 2.12).
+    return read_config().get("upgrade_from_versions", {})
+
+
 def get_storage_offload_clusters() -> dict:
     return _parse_simple("storage_offload_clusters")
 

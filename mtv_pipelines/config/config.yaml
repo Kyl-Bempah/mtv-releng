@@ -40,6 +40,12 @@ cluster_mappings:
   "4.21": "qemtv-04"
   "4.20": "none"
 
+# Override for the MTV version an upgrade job upgrades FROM, keyed by MTV X.Y.
+# Only needed when it can't be derived from the release semver, i.e. a major
+# cutover (5.0 has no 5.-1 / 5.0 predecessor, so it upgrades from 2.12).
+upgrade_from_versions:
+  "5.0": "2.12"
+
 # Cluster to OCP version mapping for UI tests
 ui_cluster_mapping:
   "qemtv-09": "none"
