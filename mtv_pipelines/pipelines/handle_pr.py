@@ -30,6 +30,7 @@ from utils import iib_short_for_target_ocp, parse_version
 from wrappers.gh_cli import GHCLI
 from wrappers.jenkins import JenkinsManager
 from wrappers.jenkins_analyzer import JenkinsAnalyzer
+from wrappers.skopeo import ImageNotFoundError
 from wrappers.slack import Slack
 
 from mtv_pipelines.wrappers.skopeo import Skopeo
@@ -284,7 +285,15 @@ async def extract_commits_prev(
         logger.warning(f"Previous task didn't return any Git Repositories")
         return []
 
-    results.extend(await extract_info(iib, git_repos))
+    try:
+        results.extend(await extract_info(iib, git_repos))
+    except ImageNotFoundError as e:
+        # Expected when an OCP version is introduced mid-PR: the prior commit
+        # predates that component's Konflux config, so its on-pr fragment was
+        # never built. Degrade to an empty changelog (handled downstream as a
+        # new Y-stream) instead of aborting the run.
+        logger.warning(f"Previous IIB {iib} not found, skipping changelog: {e}")
+        return []
 
     return results
 
