@@ -13,7 +13,7 @@ from wrappers.git import Git
 from wrappers.gh_cli import GHCLI
 from wrappers.jenkins import JenkinsManager
 from wrappers.jenkins_analyzer import JenkinsAnalyzer
-from wrappers.skopeo import Skopeo
+from wrappers.skopeo import ImageNotFoundError, Skopeo
 from wrappers.slack import Slack, SlackBuilder
 
 
@@ -27,17 +27,19 @@ def run(coro):
     return asyncio.run(coro)
 
 
-def _make_subprocess_result(stdout: bytes = b"", returncode: int = 0):
+def _make_subprocess_result(
+    stdout: bytes = b"", returncode: int = 0, stderr: bytes = b"some error"
+):
     r = MagicMock()
     r.stdout = stdout
     r.returncode = returncode
     if returncode != 0:
         r.check_returncode.side_effect = subprocess.CalledProcessError(
-            returncode, "cmd", stderr=b"some error"
+            returncode, "cmd", stderr=stderr
         )
     else:
         r.check_returncode.return_value = None
-    r.stderr = b"some error"
+    r.stderr = stderr
     return r
 
 
@@ -622,6 +624,39 @@ class TestSkopeo:
         with patch("wrappers.skopeo.subprocess.run", return_value=result):
             with pytest.raises(RuntimeError):
                 skopeo.inspect("bad-image")
+
+    @pytest.mark.parametrize(
+        "stderr",
+        [
+            b'time="x" level=fatal msg="manifest unknown"',
+            b"reading manifest sha: name unknown",
+        ],
+    )
+    def test_exec_raises_image_not_found_on_missing_image(self, skopeo, stderr):
+        result = _make_subprocess_result(b"", returncode=1, stderr=stderr)
+        with patch("wrappers.skopeo.subprocess.run", return_value=result):
+            with pytest.raises(ImageNotFoundError):
+                skopeo.copy("registry.redhat.io/img:missing", "/tmp/img")
+
+    @pytest.mark.parametrize(
+        "stderr",
+        [
+            b"unauthorized: authentication required",
+            b"bash: line 1: skopeo: command not found",
+            b"dial tcp: lookup registry.example: no such host",
+        ],
+    )
+    def test_exec_raises_plain_runtime_error_for_non_missing(
+        self, skopeo, stderr
+    ):
+        # Auth, missing-binary and network failures must stay fatal and must
+        # NOT be misclassified as an absent image (which the prev-changelog
+        # path tolerates).
+        result = _make_subprocess_result(b"", returncode=1, stderr=stderr)
+        with patch("wrappers.skopeo.subprocess.run", return_value=result):
+            with pytest.raises(RuntimeError) as excinfo:
+                skopeo.copy("registry.redhat.io/img:tag", "/tmp/img")
+        assert not isinstance(excinfo.value, ImageNotFoundError)
 
 
 # ---------------------------------------------------------------------------

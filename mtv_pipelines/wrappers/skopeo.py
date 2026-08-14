@@ -12,8 +12,17 @@ from auth.auth import (
 COMMAND = ["skopeo"]
 PROTOCOL = "docker://"
 
+# registry signatures for a genuinely-absent image/tag (NOT auth/network).
+# Kept narrow on purpose: a broad "not found" would also match a missing
+# "command not found" binary and misclassify it as an absent image.
+_NOT_FOUND_SIGNATURES = ("manifest unknown", "name unknown")
+
 
 logger = logging.getLogger(__name__)
+
+
+class ImageNotFoundError(RuntimeError):
+    """Raised when skopeo reports the image/manifest/tag does not exist."""
 
 
 class Skopeo:
@@ -32,6 +41,8 @@ class Skopeo:
             return result.stdout
         except subprocess.CalledProcessError:
             err = result.stderr.decode("utf-8")
+            if any(sig in err.lower() for sig in _NOT_FOUND_SIGNATURES):
+                raise ImageNotFoundError(err)
             raise RuntimeError(err)
 
     def __prepare_url__(self, url: str) -> str:
