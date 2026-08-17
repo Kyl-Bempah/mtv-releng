@@ -292,7 +292,13 @@ async def extract_commits_prev(
     # fragments when the newest was introduced mid-PR and its fragment was
     # never built, before giving up.
     last_err = None
-    for ocp in sorted(args.ocps, reverse=True):
+    for ocp in sorted(
+        args.ocps,
+        key=lambda x: Version.parse(
+            x.lstrip("v"), optional_minor_and_patch=True
+        ),
+        reverse=True,
+    ):
         candidate = IIB(iib_short_for_target_ocp(iib.url, ocp), iib.version)
         try:
             results.extend(await extract_info(candidate, git_repos))
