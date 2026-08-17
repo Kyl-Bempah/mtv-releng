@@ -119,10 +119,10 @@ class TestForkliftBranchFromJenkinsJob:
 
     def test_main_branch(self):
         job = JenkinsJobDTO(
-            iib_version="2.12.0-1",
+            iib_version="5.0.0-1",
             job_name="test",
             build_number=1,
-            ocp_version="v4.22",
+            ocp_version="v5.0",
             job_url="http://jenkins/job/test/1",
         )
         assert utils.forklift_branch_from_jenkins_job(job) == "main"
