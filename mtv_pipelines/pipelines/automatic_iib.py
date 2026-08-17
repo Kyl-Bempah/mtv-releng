@@ -29,6 +29,7 @@ from tasks.get_commit_diff import get_commit_diff
 from tasks.get_mtv_versions import get_mtv_versions
 from tasks.prepare_slack_build import prepare_slack_build
 from tasks.process_fbc_repo import process_fbc_repo
+from tasks.trigger_upgrade_jobs import trigger_upgrade_jobs
 from tasks.wait_for_pr import wait_for_pr
 from utils import iib_short_for_target_ocp, replace_for_quay
 from wrappers.gh_cli import GHCLI
@@ -618,48 +619,11 @@ async def trigger_jenkins_jobs(
                     )
                 )
 
-            bundle_ver = fbc_repo.for_bundle.version
-            if bundle_ver.minor > 0:
-                major_upgrade_from = f"{bundle_ver.major}.{bundle_ver.minor - 1}"
-                job = await jm.trigger_upgrade(
-                    version,
-                    ocps[1],
-                    iib_short_for_target_ocp(iib_short, ocps[1]),
-                    major_upgrade_from,
+            results.extend(
+                await trigger_upgrade_jobs(
+                    jm, version, iib_version, ocps, iib_short
                 )
-                if job:
-                    job_url_coro = await jm.get_job_info(job["job_name"], job["job_number"])
-                    job_url = job_url_coro.get("url", "")
-                    results.append(
-                        JenkinsJobDTO(
-                            iib_version=iib_version,
-                            job_name=job["job_name"],
-                            build_number=job["job_number"],
-                            ocp_version=ocps[1],
-                            job_url=job_url,
-                        )
-                    )
-
-            if bundle_ver.patch > 0:
-                minor_upgrade_from = f"{bundle_ver.major}.{bundle_ver.minor}"
-                job = await jm.trigger_upgrade(
-                    version,
-                    ocps[0],
-                    iib_short_for_target_ocp(iib_short, ocps[0]),
-                    minor_upgrade_from,
-                )
-                if job:
-                    job_url_coro = await jm.get_job_info(job["job_name"], job["job_number"])
-                    job_url = job_url_coro.get("url", "")
-                    results.append(
-                        JenkinsJobDTO(
-                            iib_version=iib_version,
-                            job_name=job["job_name"],
-                            build_number=job["job_number"],
-                            ocp_version=ocps[0],
-                            job_url=job_url,
-                        )
-                    )
+            )
 
             mtv_xy = ".".join(version.split(".")[:2])
             clusters = config.get_storage_offload_clusters()

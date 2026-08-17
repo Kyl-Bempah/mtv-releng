@@ -25,6 +25,7 @@ from tasks.extract_info import extract_info
 from tasks.get_commit_diff import get_commit_diff
 from tasks.get_mtv_versions import get_mtv_versions
 from tasks.prepare_slack_build import prepare_slack_build
+from tasks.trigger_upgrade_jobs import trigger_upgrade_jobs
 from tasks.wait_for_pr import wait_for_pr
 from utils import iib_short_for_target_ocp, parse_version
 from wrappers.gh_cli import GHCLI
@@ -285,16 +286,32 @@ async def extract_commits_prev(
         logger.warning(f"Previous task didn't return any Git Repositories")
         return []
 
-    try:
-        results.extend(await extract_info(iib, git_repos))
-    except ImageNotFoundError as e:
-        # Expected when an OCP version is introduced mid-PR: the prior commit
-        # predates that component's Konflux config, so its on-pr fragment was
-        # never built. Degrade to an empty changelog (handled downstream as a
-        # new Y-stream) instead of aborting the run.
-        logger.warning(f"Previous IIB {iib} not found, skipping changelog: {e}")
-        return []
+    # The same bundle is embedded in every OCP catalog, so the changelog can
+    # be built from any fragment that existed at the previous commit. Prefer
+    # the highest OCP (original behaviour), but fall back to older OCP
+    # fragments when the newest was introduced mid-PR and its fragment was
+    # never built, before giving up.
+    last_err = None
+    for ocp in sorted(
+        args.ocps,
+        key=lambda x: Version.parse(
+            x.lstrip("v"), optional_minor_and_patch=True
+        ),
+        reverse=True,
+    ):
+        candidate = IIB(iib_short_for_target_ocp(iib.url, ocp), iib.version)
+        try:
+            results.extend(await extract_info(candidate, git_repos))
+            return results
+        except ImageNotFoundError as e:
+            last_err = e
+            logger.warning(
+                f"Previous fragment {candidate.url} not found, trying next OCP"
+            )
 
+    logger.warning(
+        f"No previous fragment found for any OCP, skipping changelog: {last_err}"
+    )
     return results
 
 
@@ -456,9 +473,17 @@ async def trigger_jenkins_jobs(
             return []
         iib_short = iib.url.split("/")[-1]
         iib_version = str(fbc_repo.current_iib_version)
-        ocps = fbc_repo.for_bundle.ocps
-        ocps.sort()
-        ocps.reverse()
+        # Order OCP versions high -> low. Sort semantically (not lexically):
+        # a plain string sort orders "v5.10" before "v5.9", picking the wrong
+        # OCP once a minor reaches double digits. Copy into a new list so we
+        # don't mutate the bundle's canonical (ascending) ocps list.
+        ocps = sorted(
+            fbc_repo.for_bundle.ocps,
+            key=lambda x: Version.parse(
+                x.lstrip("v"), optional_minor_and_patch=True
+            ),
+            reverse=True,
+        )
         version = str(fbc_repo.for_bundle.version)
 
         job = await jm.trigger_release_gate(
@@ -499,6 +524,10 @@ async def trigger_jenkins_jobs(
                     job_url=job_url,
                 )
             )
+
+        results.extend(
+            await trigger_upgrade_jobs(jm, version, iib_version, ocps, iib_short)
+        )
 
         mtv_xy = ".".join(version.split(".")[:2])
         clusters = config.get_storage_offload_clusters()
