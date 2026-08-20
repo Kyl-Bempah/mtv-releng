@@ -31,10 +31,11 @@ from tasks.prepare_slack_build import prepare_slack_build
 from tasks.process_fbc_repo import process_fbc_repo
 from tasks.trigger_upgrade_jobs import trigger_upgrade_jobs
 from tasks.wait_for_pr import wait_for_pr
-from utils import iib_short_for_target_ocp, replace_for_quay
+from utils import collect_jira_keys, iib_short_for_target_ocp, replace_for_quay
 from wrappers.gh_cli import GHCLI
 from wrappers.jenkins import JenkinsManager
 from wrappers.jenkins_analyzer import JenkinsAnalyzer
+from wrappers.jira_fixed_in_build import JiraFixedInBuild
 from wrappers.skopeo import Skopeo
 from wrappers.slack import Slack
 
@@ -67,6 +68,12 @@ def arg_parse(arg_parser):
         "-s",
         "--skip-slack",
         help="Tells the pipeline to skip sending the slack message",
+        required=False,
+        action="store_true",
+    )
+    arg_parser.add_argument(
+        "--skip-fixed-in-build",
+        help="Tells the pipeline to skip notifying the Jira fixed-in-build webhook",
         required=False,
         action="store_true",
     )
@@ -541,6 +548,45 @@ async def send_slack_build_msg(
             )
         )
     return result
+
+
+@task
+@depends_on(extract_commit_diff, wait_for_prs)
+async def notify_jira_fixed_in_build(
+    data: CollectorDTO, args: Namespace, tg: TaskGroup
+) -> EmptyDTO:
+    if args.skip_fixed_in_build:
+        logger.info(
+            "Skipping Jira fixed-in-build as --skip-fixed-in-build arg was provided"
+        )
+        return EmptyDTO()
+
+    if not data:
+        logger.warning(f"Previous task didn't return any data")
+        return EmptyDTO()
+
+    if not data.task_outputs.get(extract_commit_diff.name):
+        logger.warning(f"Previous task didn't return any commit diff")
+        return EmptyDTO()
+
+    if not data.task_outputs.get(wait_for_prs.name):
+        logger.warning(f"Previous task didn't return any FBC repos")
+        return EmptyDTO()
+
+    issue_keys = collect_jira_keys(data.task_outputs[extract_commit_diff.name])
+    if not issue_keys:
+        logger.info("No Jira issues to notify")
+        return EmptyDTO()
+
+    try:
+        jira = JiraFixedInBuild()
+    except (RuntimeError, ValueError) as error:
+        logger.error(f"Cannot initialize Jira fixed-in-build notification: {error}")
+        return EmptyDTO()
+
+    for fbc_repo in data.task_outputs[wait_for_prs.name]:
+        jira.notify_build(issue_keys, str(fbc_repo.current_iib_version))
+    return EmptyDTO()
 
 
 @task
