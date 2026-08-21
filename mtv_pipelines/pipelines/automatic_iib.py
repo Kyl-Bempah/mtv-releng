@@ -573,8 +573,21 @@ async def notify_jira_fixed_in_build(
         logger.warning(f"Previous task didn't return any FBC repos")
         return EmptyDTO()
 
-    issue_keys = collect_jira_keys(data.task_outputs[extract_commit_diff.name])
-    if not issue_keys:
+    diffs = data.task_outputs[extract_commit_diff.name]
+
+    # Match each build to only its own X.Y stream's Jira keys so an issue fixed
+    # in one version isn't stamped fixed-in-build against an unrelated version's
+    # IIB when a run processes multiple versions (e.g. without --process-version).
+    notifications = []
+    for fbc_repo in data.task_outputs[wait_for_prs.name]:
+        version_xy = ".".join(str(fbc_repo.for_bundle.version).split(".")[:2])
+        keys = collect_jira_keys(
+            [d for d in diffs if ".".join(d.version.split(".")[:2]) == version_xy]
+        )
+        if keys:
+            notifications.append((str(fbc_repo.current_iib_version), keys))
+
+    if not notifications:
         logger.info("No Jira issues to notify")
         return EmptyDTO()
 
@@ -584,8 +597,8 @@ async def notify_jira_fixed_in_build(
         logger.error(f"Cannot initialize Jira fixed-in-build notification: {error}")
         return EmptyDTO()
 
-    for fbc_repo in data.task_outputs[wait_for_prs.name]:
-        jira.notify_build(issue_keys, str(fbc_repo.current_iib_version))
+    for iib_version, keys in notifications:
+        jira.notify_build(keys, iib_version)
     return EmptyDTO()
 
 
