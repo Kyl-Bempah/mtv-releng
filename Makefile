@@ -63,3 +63,9 @@ dev: | network logs/ data/ build shell
 run: | logs/ data/
 	@echo "Running with arguments: $(ARGS)"
 	$(CONTAINER_ENGINE) run --rm --env-file .env -v ./logs/:/$(WORKDIR)/logs:z -v ./data/:/$(WORKDIR)/data:z -it $(IMAGE_NAME) /bin/bash -c "poetry run python mtv_pipelines/main.py $(ARGS)"
+
+# Run the pipeline with arbitrary arguments in a detached mode, e.g.: make run ARGS="--help"
+run-background: | logs/ data/
+	@echo "Running with arguments: $(ARGS)"
+	$(CONTAINER_ENGINE) run -d --rm --env-file .env -v ./logs/:/$(WORKDIR)/logs:z -v ./data/:/$(WORKDIR)/data:z -it $(IMAGE_NAME) /bin/bash -c "poetry run python mtv_pipelines/main.py $(ARGS)"
+
