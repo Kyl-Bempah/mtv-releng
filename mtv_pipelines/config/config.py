@@ -171,3 +171,8 @@ def get_ui_cluster_mapping() -> dict:
 
 def get_release_conf_path() -> str:
     return _parse_simple("release_conf_path")
+
+
+def get_component_arg_mappings() -> dict:
+    # Bundle sync: upstream component name -> Containerfile-downstream ARG name.
+    return _parse_simple("component_arg_mappings")

@@ -120,6 +120,16 @@ Waits for Jenkins job URLs to finish, analyzes failures, and optionally posts to
 
 **Key flags:** `--ts`
 
+### `btrfs_sync`
+Mirrors a public forklift branch into the internal GitLab repository (rebases onto the internal mirror and origin, then force-pushes). Uses shallow, targeted fetches. Python port of `scripts/btrfs_sync.sh`.
+
+**Key flags:** `--branch` (required), `--dry-run`
+
+### `bundle_sync`
+Updates `Containerfile-downstream` ARG `*_IMAGE` SHA references from the latest stage snapshot and opens (or rebases and updates an existing) PR against the target branch. Pulls the virt-v2v-int SHA from the internal quay tenant. Python port of `scripts/bundle_sync.sh`. **Dry-run by default** — pass `--apply` to push.
+
+**Key flags:** `version` (positional, required), `--target-branch`, `--apply`
+
 ---
 
 ## Tasks
@@ -138,6 +148,7 @@ Reusable async/sync work units composed inside pipelines.
 | `process_fbc_repo` | Bumps the prerelease version in FBC git, updates catalogs per OCP, commits/pushes |
 | `process_ocp_catalog` | Initializes/renders an OPM catalog, adds bundle and channel entries |
 | `wait_for_pr` | Polls GitHub PR checks; retries `/retest` on failure until success or max retries |
+| `bundle_sync_sha` | virt-v2v probe + snapshot→SHA mapping and Containerfile ARG edits for the `bundle_sync` pipeline |
 
 ---
 
@@ -146,9 +157,10 @@ Reusable async/sync work units composed inside pipelines.
 | Wrapper | External tool | Purpose |
 |---------|--------------|---------|
 | `slack.py` | `slack-sdk` | Block Kit message builder + `send_build` / `send_ci_status` methods |
-| `git.py` | `GitPython` | Clone, log, checkout, commit, push |
+| `git.py` | `GitPython` | Clone (incl. shallow), fetch, checkout, rebase/merge, commit, push (incl. force/with-lease), remotes |
 | `gh_cli.py` | `gh` CLI | List/create PRs, list/trigger checks, post comments |
 | `skopeo.py` | `skopeo` | `inspect`, `copy`, `login` for stage/prod registries |
+| `oc.py` | `oc` CLI | Latest release, snapshot-from-release, snapshot content (for `bundle_sync`) |
 | `jenkins.py` | `python-jenkins` | Trigger jobs, wait for queue/build, MTV-specific job helpers |
 | `jenkins_analyzer.py` | HTTP service | POST failed job info to analyzer, return structured `JenkinsJobAnalysisDTO` |
 

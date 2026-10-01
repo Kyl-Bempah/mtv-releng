@@ -206,3 +206,24 @@ class ReversionResultDTO(BaseModel):
     pr_url: str = ""
     skipped: bool = False
     skip_reason: str = ""
+
+
+class BtrfsSyncResultDTO(BaseModel):
+    branch: str
+    created_from_main: bool = False
+    pushed: bool = False
+    dry_run: bool = False
+    skipped: bool = False
+    skip_reason: str = ""
+
+
+class BundleSyncResultDTO(BaseModel):
+    version: str
+    target_branch: str
+    snapshot: str = ""
+    components_updated: int = 0
+    pr_url: str = ""
+    existing_branch: str = ""
+    dry_run: bool = False
+    skipped: bool = False
+    skip_reason: str = ""

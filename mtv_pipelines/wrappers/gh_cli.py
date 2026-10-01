@@ -108,6 +108,54 @@ class GHCLI:
         raise RuntimeError(f"Couldn't extract PR URL from {output}")
 
     # Example:
+    # gh pr list --repo kubev2v/forklift --base main --state open --json number,headRefName,title
+    def list_open_prs_for_base(
+        self, base: str, repo: str, limit: int = 50
+    ) -> list[dict]:
+        self.cmd = COMMAND.copy()
+        self.cmd.extend(
+            [
+                "pr",
+                "list",
+                "--repo",
+                repo,
+                "--base",
+                base,
+                "--state",
+                "open",
+                "--json",
+                "number,headRefName,title",
+                "--limit",
+                str(limit),
+            ]
+        )
+        return json.loads(self.__exec__())
+
+    # Example:
+    # gh pr create --repo kubev2v/forklift --title t --body b --base main --head bump
+    def create_pr_for_repo(
+        self, repo: str, title: str, body: str, base: str, head: str
+    ) -> None:
+        self.cmd = COMMAND.copy()
+        self.cmd.extend(
+            [
+                "pr",
+                "create",
+                "--repo",
+                repo,
+                "--title",
+                title,
+                "--body",
+                body,
+                "--base",
+                base,
+                "--head",
+                head,
+            ]
+        )
+        self.__exec__()
+
+    # Example:
     # gh pr checks --json=name,state https://github.com/kubev2v/mtv-fbc/pull/123
     def list_pr_checks(self, pr_url: str):
         self.cmd = COMMAND.copy()

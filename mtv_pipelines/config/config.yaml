@@ -173,6 +173,29 @@ raw_mappings:
   forklift-int: "https://gitlab.cee.redhat.com/mtv/forklift/-/raw/{branch}/build/\
     release.conf"
 
+# Bundle sync: upstream component name -> Containerfile-downstream ARG name.
+# Mirrors scripts/component_mappings.conf (used by the bundle_sync pipeline).
+component_arg_mappings:
+  forklift-api: "API_IMAGE"
+  forklift-controller: "CONTROLLER_IMAGE"
+  forklift-operator: "OPERATOR_IMAGE"
+  forklift-console-plugin: "UI_PLUGIN_IMAGE"
+  forklift-cli-download: "CLI_DOWNLOAD_IMAGE"
+  forklift-must-gather: "MUST_GATHER_IMAGE"
+  validation: "VALIDATION_IMAGE"
+  openstack-populator: "OPENSTACK_POPULATOR_IMAGE"
+  ovirt-populator: "OVIRT_POPULATOR_IMAGE"
+  populator-controller: "POPULATOR_CONTROLLER_IMAGE"
+  ova-provider-server: "OVA_PROVIDER_SERVER_IMAGE"
+  forklift-ova-proxy: "OVA_PROXY_IMAGE"
+  virt-v2v: "VIRT_V2V_IMAGE"
+  virt-v2v-rhel9: "VIRT_V2V_IMAGE_RHEL9"
+  vsphere-copy-offload-populator: "VSPHERE_COPY_OFFLOAD_POPULATOR_IMAGE"
+  vsphere-xcopy-volume-populator: "VSPHERE_XCOPY_VOLUME_POPULATOR_IMAGE"
+  hyperv-provider-server: "HYPERV_PROVIDER_SERVER_IMAGE"
+  deep-inspection: "DEEP_INSPECTION_IMAGE"
+  deep-inspection-rhel9: "DEEP_INSPECTION_IMAGE_RHEL9"
+
 # Component mappings
 # mapping key = Downstream name of the component (e.g. image repository in comet)
 # upstream = Upstream name of the component (e.g. image repository in konflux)
