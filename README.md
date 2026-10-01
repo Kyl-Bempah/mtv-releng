@@ -130,6 +130,16 @@ Updates `Containerfile-downstream` ARG `*_IMAGE` SHA references from the latest 
 
 **Key flags:** `version` (positional, required), `--target-branch`, `--apply`
 
+### `branching`
+Branches the MTV operator repos (forklift, console-plugin, must-gather) for a release. For each origin it creates the `release-X.Y` branch from main and opens a `CF-<version>` code-freeze PR into it that regenerates `build/release.conf` and retargets the `.tekton` pipelines from dev-preview to the release stream (and, for forklift, bumps `images.conf`). Python port of the MTV-repo half of `scripts/branching.sh` (uses the bot's direct push + PR model instead of personal forks). **Dry-run by default** — pass `--apply`.
+
+**Key flags:** `version` (positional, required), `--origin` (repeatable), `--release`, `--channel`, `--default-channel`, `--registry`, `--ocp-versions`, `--apply`
+
+### `konflux_stream`
+Adds a release stream to the Konflux releng repo (`konflux-release-data`): renders the prod tenant's `operator/streams/<version>.yaml` from `dev-preview.yaml` and registers it in `kustomization.yaml`, appends the btrfs tenant `ProjectDevelopmentStream`, retargets both tenants' `ReleasePlanAdmission`s, runs `build-single.sh` (optionally `tox`), pushes `mtv_add_stream`, and opens the MR via the GitLab API (falls back to logging manual instructions if the token lacks `api` scope). Python port of the Konflux half of `scripts/branching.sh` (post-#53 model). **Dry-run by default** — pass `--apply`.
+
+**Key flags:** `version` (positional, required), `--registry`, `--run-tox`, `--apply`
+
 ---
 
 ## Tasks
@@ -149,6 +159,8 @@ Reusable async/sync work units composed inside pipelines.
 | `process_ocp_catalog` | Initializes/renders an OPM catalog, adds bundle and channel entries |
 | `wait_for_pr` | Polls GitHub PR checks; retries `/retest` on failure until success or max retries |
 | `bundle_sync_sha` | virt-v2v probe + snapshot→SHA mapping and Containerfile ARG edits for the `bundle_sync` pipeline |
+| `branching` | release.conf rendering + `.tekton` retargeting transforms for the `branching` pipeline |
+| `konflux_stream` | prod stream / btrfs PDS / ReleasePlanAdmission transforms for the `konflux_stream` pipeline |
 
 ---
 
@@ -157,7 +169,7 @@ Reusable async/sync work units composed inside pipelines.
 | Wrapper | External tool | Purpose |
 |---------|--------------|---------|
 | `slack.py` | `slack-sdk` | Block Kit message builder + `send_build` / `send_ci_status` methods |
-| `git.py` | `GitPython` | Clone (incl. shallow), fetch, checkout, rebase/merge, commit, push (incl. force/with-lease), remotes |
+| `git.py` | `GitPython` | Clone (incl. shallow), fetch, checkout, rebase/merge, add (incl. dirs/renames), commit, push (incl. force/with-lease), remotes |
 | `gh_cli.py` | `gh` CLI | List/create PRs, list/trigger checks, post comments |
 | `skopeo.py` | `skopeo` | `inspect`, `copy`, `login` for stage/prod registries |
 | `oc.py` | `oc` CLI | Latest release, snapshot-from-release, snapshot content (for `bundle_sync`) |
@@ -231,6 +243,11 @@ automatic_iib
 ## Branching helper
 
 Automates branching of the MTV operator across all relevant repositories.
+
+> **Note:** there are now Python equivalents — the `branching` pipeline (MTV repos)
+> and `konflux_stream` pipeline (Konflux releng side). Both are dry-run by default
+> (`--apply` to push). They use the automation bot's direct push + PR model rather
+> than personal forks. The interactive shell script below remains for manual runs.
 
 ```bash
 scripts/branching.sh

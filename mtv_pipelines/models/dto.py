@@ -227,3 +227,29 @@ class BundleSyncResultDTO(BaseModel):
     dry_run: bool = False
     skipped: bool = False
     skip_reason: str = ""
+
+
+class BranchingResultDTO(BaseModel):
+    origin: str
+    version: str
+    release_branch: str
+    cf_branch: str
+    release_branch_created: bool = False
+    pr_url: str = ""
+    dry_run: bool = False
+    skipped: bool = False
+    skip_reason: str = ""
+
+
+class KonfluxStreamResultDTO(BaseModel):
+    version: str
+    version_name: str
+    branch: str = ""
+    prod_stream_file: str = ""
+    btrfs_updated: bool = False
+    rpa_files_created: int = 0
+    pushed: bool = False
+    mr_url: str = ""
+    dry_run: bool = False
+    skipped: bool = False
+    skip_reason: str = ""

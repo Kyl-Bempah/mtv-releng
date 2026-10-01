@@ -164,6 +164,11 @@ class Git:
     def add_files(self, files: list[str]):
         self.repo.index.add(files)
 
+    def add_paths(self, paths: list[str]):
+        # Uses `git add` (not index.add) so directories and deletions/renames
+        # within a pathspec get staged, e.g. renamed .tekton/ files.
+        self.repo.git.add(*paths)
+
     def commit(self, message: str):
         self.repo.git.commit("-s", "-m", message)
 
