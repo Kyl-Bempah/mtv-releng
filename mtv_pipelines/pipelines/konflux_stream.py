@@ -101,6 +101,10 @@ def _create_konflux_mr(token: str, title: str, description: str) -> str:
     """
     project = urllib.parse.quote_plus(KONFLUX_PROJECT_PATH)
     url = f"{KONFLUX_HOST}/api/v4/projects/{project}/merge_requests"
+    # Trust the internal CA bundle rather than disabling verification (same as
+    # wrappers/jenkins.py): the PRIVATE-TOKEN header must not be sent over an
+    # unverified connection. If the bundle doesn't cover the host this raises an
+    # SSLError, which the caller treats as non-fatal (branch is already pushed).
     resp = requests.post(
         url,
         headers={"PRIVATE-TOKEN": token},
@@ -111,7 +115,8 @@ def _create_konflux_mr(token: str, title: str, description: str) -> str:
             "description": description,
             "remove_source_branch": "true",
         },
-        verify=False,
+        verify=config.get_root_cert_path(),
+        timeout=(10, 60),
     )
     if resp.status_code in (200, 201):
         return resp.json().get("web_url", "")
@@ -297,7 +302,7 @@ async def add_stream(
             ),
         )
         logger.info({"msg": "MR created", "mr_url": mr_url})
-    except RuntimeError as e:
+    except (RuntimeError, requests.exceptions.RequestException) as e:
         logger.warning(
             f"Could not auto-create MR ({e}); push succeeded, open it manually "
             f"at {KONFLUX_HOST}/{KONFLUX_PROJECT_PATH}/-/merge_requests/new"

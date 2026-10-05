@@ -123,7 +123,9 @@ async def sync_branch(
         )
 
     logger.info(f"Force-pushing {branch} to internal")
-    git.push(branch=branch, remote_name="internal", force="force")
+    # with-lease (not plain force): internal/{branch} was fetched above, so this
+    # rejects the push if someone updated internal in the meantime.
+    git.push(branch=branch, remote_name="internal", force="lease")
 
     return BtrfsSyncResultDTO(
         branch=branch,

@@ -210,7 +210,7 @@ def get_latest_virt_v2v_int_sha(version: str) -> str:
         f"Fetching latest virt-v2v-int SHA for version {version} "
         f"(repo: {image_base})"
     )
-    resp = requests.get(api_url)
+    resp = requests.get(api_url, timeout=30)
     if resp.status_code != 200:
         raise RuntimeError(
             f"Failed to fetch tags from Quay.io API "

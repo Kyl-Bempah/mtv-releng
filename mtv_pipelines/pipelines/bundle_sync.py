@@ -9,7 +9,6 @@ import requests
 from config import config
 from core.task import task
 from models.dto import BundleSyncResultDTO
-from requests.exceptions import SSLError
 from tasks.bundle_sync_sha import (
     VirtV2vProbe,
     add_virt_v2v_int_sha,
@@ -65,13 +64,9 @@ def arg_parse(arg_parser: ArgumentParser):
 
 def _fetch_raw_containerfile(branch: str) -> str | None:
     url = f"{CONTAINERFILE_BASE_URL}/{branch}/{CONTAINERFILE_PATH}"
-    try:
-        resp = requests.get(url)
-    except SSLError as ex:
-        if "self-signed" in str(ex):
-            resp = requests.get(url, verify=False)
-        else:
-            raise
+    # raw.githubusercontent.com has a valid public cert; keep TLS verification on
+    # (a self-signed cert here would mean interception, not a legit endpoint).
+    resp = requests.get(url, timeout=30)
     if resp.status_code != 200:
         logger.warning(f"{url} returned {resp.status_code}")
         return None

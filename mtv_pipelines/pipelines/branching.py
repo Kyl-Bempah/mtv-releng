@@ -209,7 +209,13 @@ async def _branch_one(
 
     git.add_paths(paths)
     git.commit(f"Code freeze for {xy}")
-    git.push(branch=cf_branch)
+    # On a rerun (e.g. after a prior PR-creation failure) CF-<version> may already
+    # exist on origin; with-lease lets us update it without clobbering unexpected
+    # remote work. The remote-tracking ref is present from the full clone.
+    if git.ref_exists(f"origin/{cf_branch}"):
+        git.push(branch=cf_branch, force="lease")
+    else:
+        git.push(branch=cf_branch)
 
     body = (
         f"Code freeze for {xy}.\n\n"
@@ -229,6 +235,17 @@ async def _branch_one(
     except RuntimeError as e:
         logger.warning(
             {"msg": "PR creation failed", "origin": origin, "error": str(e)}
+        )
+        # The branch was pushed; surface the PR failure instead of looking like
+        # a clean success with an empty pr_url.
+        return base.model_copy(
+            update={
+                "release_branch_created": release_branch_created,
+                "skipped": True,
+                "skip_reason": (
+                    f"{cf_branch} pushed but PR creation failed: {e}"
+                ),
+            }
         )
 
     return base.model_copy(

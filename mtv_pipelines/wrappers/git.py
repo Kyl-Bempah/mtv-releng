@@ -1,10 +1,18 @@
 import asyncio
 import logging
+import re
 from typing import Any, Dict, List
 
 import git
 
 logger = logging.getLogger(__name__)
+
+_URL_CREDS = re.compile(r"(://)[^/@]+@")
+
+
+def _redact(url: str) -> str:
+    """Strip any user:token@ userinfo so credentials never reach the logs."""
+    return _URL_CREDS.sub(r"\1", url)
 
 
 class Git:
@@ -17,7 +25,7 @@ class Git:
         depth: int | None = None,
         single_branch: bool | None = None,
     ) -> None:
-        logger.info(f"Cloning from {url} to {self.repo_path}")
+        logger.info(f"Cloning from {_redact(url)} to {self.repo_path}")
         kwargs: dict[str, Any] = {}
         if depth is not None:
             kwargs["depth"] = depth
@@ -26,11 +34,11 @@ class Git:
         self.repo = await asyncio.to_thread(
             lambda: git.Repo.clone_from(url, self.repo_path, **kwargs)
         )
-        logger.info(f"Finished cloning from {url} to {self.repo_path}")
+        logger.info(f"Finished cloning from {_redact(url)} to {self.repo_path}")
 
     def add_remote(self, name: str, url: str) -> None:
         self._ensure_repo()
-        logger.info(f"Adding remote '{name}' -> {url}")
+        logger.info(f"Adding remote '{name}' -> {_redact(url)}")
         self.repo.create_remote(name, url)
 
     def ref_exists(self, ref: str) -> bool:

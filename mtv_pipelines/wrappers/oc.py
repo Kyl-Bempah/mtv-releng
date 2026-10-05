@@ -3,6 +3,7 @@ import logging
 import subprocess
 
 COMMAND = ["oc"]
+DEFAULT_TIMEOUT = 120
 
 logger = logging.getLogger(__name__)
 
@@ -18,9 +19,16 @@ class Oc:
     def __init__(self):
         self.cmd = COMMAND.copy()
 
-    def __exec__(self) -> bytes:
+    def __exec__(self, timeout: int = DEFAULT_TIMEOUT) -> bytes:
         logger.info(f"Executing {self.cmd}")
-        result = subprocess.run(self.cmd, capture_output=True)
+        try:
+            result = subprocess.run(
+                self.cmd, capture_output=True, timeout=timeout
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(
+                f"`oc` timed out after {timeout}s: {' '.join(self.cmd)}"
+            )
         try:
             result.check_returncode()
             return result.stdout
@@ -37,7 +45,10 @@ class Oc:
         )
         output = self.__exec__().decode("utf-8")
 
-        needles = ["Succeeded", f"forklift-operator-{version}", f"rp-{target}"]
+        # Trailing "-" bounds the version so e.g. "2-11" doesn't match "2-110"
+        # and "2.10.1" doesn't match "2.10.10" (the version is always followed
+        # by "-rp-..." in the release name).
+        needles = ["Succeeded", f"forklift-operator-{version}-", f"rp-{target}"]
         if rhel:
             needles.append(f"-rhel{rhel}")
 
