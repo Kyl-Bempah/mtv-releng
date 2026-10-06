@@ -16,7 +16,7 @@ if [[ ${component_url:0:${#PROT}} != $PROT ]]; then
   component_url="${PROT}${component_url}"
 fi
 
-log "Getting commit from $component_url..."
+log_info "Getting commit from $component_url..."
 metadata=$(skopeo inspect -n $component_url)
 commit=$(echo $metadata | jq -r '.Labels.revision')
 
@@ -24,17 +24,17 @@ commit=$(echo $metadata | jq -r '.Labels.revision')
 cl_output
 
 if [[ $commit == "null" ]]; then
-  log "Commit hash not found. Image is probably missing 'revision' label."
-  log "Trying with 'vcs-ref' label. WARN: This may not indicate the correct build commit for OPERATOR_IMAGE"
+  log_warning "Commit hash not found. Image is probably missing 'revision' label."
+  log_warning "Trying with 'vcs-ref' label. WARN: This may not indicate the correct build commit for OPERATOR_IMAGE"
 
   commit=$(echo $metadata | jq -r '.Labels."vcs-ref"')
   if [[ $commit == "null" ]]; then
-    log "Commit not found even with 'vcs-ref' label."
+    log_error "Commit not found even with 'vcs-ref' label."
   else
-    log "### RESULT ###"
+    log_success "### RESULT ###"
     w_output $(ytj "COMMIT: $commit")
   fi
 else
-  log "### RESULT ###"
+  log_success "### RESULT ###"
   w_output $(ytj "COMMIT: $commit")
 fi
