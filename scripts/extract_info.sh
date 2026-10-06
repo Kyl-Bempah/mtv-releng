@@ -18,8 +18,8 @@ fi
 # get bundle image url present in the IIB
 scripts/iib.sh $iib_url $version
 bundle_img=$(r_output | jq '.BUNDLE_IMAGE' -r)
-log "# Bundle image extracted from IIB #"
-log "$bundle_img"
+log_success "# Bundle image extracted from IIB #"
+log_info "$bundle_img"
 
 # keep original URL
 bundle_original_url=$bundle_img
@@ -32,7 +32,7 @@ scripts/bundle.sh $bundle_img
 cmps=$(r_output | jq '.' -r)
 
 # component origins
-origins='{"mtv-controller-rhel9": "forklift", "mtv-must-gather-rhel9": "forklift-must-gather", "mtv-validation-rhel9":"forklift", "mtv-api-rhel9":"forklift", "mtv-populator-controller-rhel9":"forklift", "mtv-rhv-populator-rhel8":"forklift", "mtv-virt-v2v-rhel9":"forklift", "mtv-openstack-populator-rhel9":"forklift", "mtv-console-plugin-rhel9":"forklift-console-plugin", "mtv-ova-provider-server-rhel9":"forklift", "mtv-vsphere-copy-offload-populator-rhel9":"forklift", "mtv-vsphere-xcopy-volume-populator-rhel9":"forklift", "mtv-rhel9-operator":"forklift", "mtv-operator-bundle": "forklift", "mtv-cli-download-rhel9": "forklift", "mtv-ova-proxy-rhel9": "forklift", "mtv-virt-v2v-rhel10": "forklift", "mtv-deep-inspection-rhel10": "forklift", "mtv-deep-inspection-rhel9": "forklift"}'
+origins='{"mtv-controller-rhel9": "forklift", "mtv-must-gather-rhel9": "forklift-must-gather", "mtv-validation-rhel9":"forklift", "mtv-api-rhel9":"forklift", "mtv-populator-controller-rhel9":"forklift", "mtv-rhv-populator-rhel8":"forklift", "mtv-virt-v2v-rhel9":"forklift", "mtv-openstack-populator-rhel9":"forklift", "mtv-console-plugin-rhel9":"forklift-console-plugin", "mtv-ova-provider-server-rhel9":"forklift", "mtv-vsphere-copy-offload-populator-rhel9":"forklift", "mtv-vsphere-xcopy-volume-populator-rhel9":"forklift", "mtv-rhel9-operator":"forklift", "mtv-operator-bundle": "forklift", "mtv-cli-download-rhel9": "forklift", "mtv-ova-proxy-rhel9": "forklift", "mtv-virt-v2v-rhel10": "forklift", "mtv-deep-inspection-rhel10": "forklift", "mtv-deep-inspection-rhel9": "forklift", "mtv-hyperv-provider-server-rhel9": "forklift"}'
 
 commits="[]"
 
@@ -79,7 +79,7 @@ for commit in $(echo $commits | jq '.[]' -rc); do
   cmp=$(echo $commit | jq '.cmp' -r)
 
   construct_json=$(echo $construct_json | jq ".commits += {\"$cmp\":\"$sha\"}")
-  log $cmp": "$sha
+  log_info $cmp": "$sha
 
   if ! [[ ${by_origin[$origin]} == *"$sha"* ]]; then
     # group by origin
@@ -143,7 +143,7 @@ for origin in ${!by_origin[@]}; do
   cd ..
 done
 
-log "# Build info from IIB #"
+log_success "# Build info from IIB #"
 w_output $(echo $construct_json | jq '.')
 
 cd ..

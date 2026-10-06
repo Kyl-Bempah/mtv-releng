@@ -18,17 +18,17 @@ fi
 
 # Get image manifests
 tmp_dir=$(mktemp -d)
-log "Getting bundle $bundle_url..."
-log "Using $tmp_dir directory for manifests"
+log_info "Getting bundle $bundle_url..."
+log_info "Using $tmp_dir directory for manifests"
 bundle_commit=$(skopeo inspect -n $bundle_url | jq -r '.Labels | .["vcs-ref"]')
-log "Pulling image metadata..."
+log_info "Pulling image metadata..."
 skopeo copy $bundle_url "dir://${tmp_dir}"
 
 # Get last layer from image
 # It contains the csv layer
 layer_sha=$(cat $tmp_dir/manifest.json | jq '.layers | last | .digest' -r)
-log "Layer containing the csv: $layer_sha"
-log "Extracting components..."
+log_info "Layer containing the csv: $layer_sha"
+log_info "Extracting components..."
 
 # Split the format "sha256:1234..." into ["sha256", "1234..."] and get only the hash
 IFS=':'
@@ -44,7 +44,7 @@ operator_image=$(cat $tmp_dir/manifests/*.clusterserviceversion.yaml | yq '.spec
 
 # clear output file
 cl_output
-log "### RESULT ###"
+log_success "### RESULT ###"
 
 # Add operator image to others
 # Line break here is important

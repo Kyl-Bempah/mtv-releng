@@ -22,15 +22,15 @@ fi
 
 # Get image manifests
 tmp_dir=$(mktemp -d)
-log "Getting IIB $iib_url..."
-log "Using $tmp_dir directory for manifests"
-log "Pulling image metadata..."
+log_info "Getting IIB $iib_url..."
+log_info "Using $tmp_dir directory for manifests"
+log_info "Pulling image metadata..."
 skopeo copy $iib_url "dir://${tmp_dir}"
 
 # Get last layer from image
 # It contains the catalog layer
 layer_sha=$(cat $tmp_dir/manifest.json | jq '.layers | last | .digest' -r)
-log "Layer containing the catalog: $layer_sha"
+log_info "Layer containing the catalog: $layer_sha"
 
 # Split the format "sha256:1234..." into ["sha256", "1234..."] and get only the hash
 layer_sha=${layer_sha#*\:}
@@ -42,11 +42,11 @@ tar -xf "${tmp_dir}/${layer_sha}" -C $tmp_dir
 bundle_img=$(cat $tmp_dir/configs/$operator_pkg/catalog.json | jq -r ". | select(.name == \"${operator_pkg}.v${version}\") | .image")
 
 if [[ -z $bundle_img ]]; then
-  log "Could not find bundle image in specified IIB for specified version."
+  log_error "Could not find bundle image in specified IIB for specified version."
 else
   # clear output file
   cl_output
-  log "### RESULT ###"
+  log_success "### RESULT ###"
   # Don't know if it's still necessary to remove the trailing char
   w_output $(ytj "BUNDLE_IMAGE: $bundle_img")
 fi
