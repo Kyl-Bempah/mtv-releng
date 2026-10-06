@@ -174,5 +174,18 @@ def get_release_conf_path() -> str:
 
 
 def get_component_arg_mappings() -> dict:
-    # Bundle sync: upstream component name -> Containerfile-downstream ARG name.
-    return _parse_simple("component_arg_mappings")
+    # Bundle sync: upstream component name -> Containerfile-downstream ARG name,
+    # derived from the `arg` field on cmp_mappings entries that carry one.
+    return {
+        entry["upstream"]: entry["arg"]
+        for entry in get_cmp_mappings().values()
+        if entry.get("upstream") and entry.get("arg")
+    }
+
+
+def get_images_conf_path() -> str:
+    return _parse_simple("images_conf_path")
+
+
+def get_btrfs_sync() -> dict:
+    return _parse_simple("btrfs_sync")

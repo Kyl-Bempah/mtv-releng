@@ -155,6 +155,22 @@ allowed_project_keys:
 # Path to the version config file within each origin repository
 release_conf_path: "build/release.conf"
 
+# Branching pipeline: bundle images.conf (forklift only), retargeted at code freeze
+images_conf_path: "build/forklift-operator-bundle/images.conf"
+
+# btrfs_sync pipeline: public <-> internal forklift mirror settings
+btrfs_sync:
+  public_repo: "https://github.com/kubev2v/forklift.git"
+  internal_repo: "https://gitlab.cee.redhat.com/mtv/forklift.git"
+  fetch_depth: 50
+  # git settings that make large-repo fetches more reliable (see PR #53)
+  large_repo_git_config:
+    http.postBuffer: "524288000"
+    http.maxRequestBuffer: "100M"
+    core.preloadindex: "true"
+    core.fscache: "true"
+    gc.auto: "256"
+
 # Forklift "component" repositories
 repositories:
   forklift: "https://github.com/kubev2v/forklift"
@@ -173,89 +189,82 @@ raw_mappings:
   forklift-int: "https://gitlab.cee.redhat.com/mtv/forklift/-/raw/{branch}/build/\
     release.conf"
 
-# Bundle sync: upstream component name -> Containerfile-downstream ARG name.
-# Mirrors scripts/component_mappings.conf (used by the bundle_sync pipeline).
-component_arg_mappings:
-  forklift-api: "API_IMAGE"
-  forklift-controller: "CONTROLLER_IMAGE"
-  forklift-operator: "OPERATOR_IMAGE"
-  forklift-console-plugin: "UI_PLUGIN_IMAGE"
-  forklift-cli-download: "CLI_DOWNLOAD_IMAGE"
-  forklift-must-gather: "MUST_GATHER_IMAGE"
-  validation: "VALIDATION_IMAGE"
-  openstack-populator: "OPENSTACK_POPULATOR_IMAGE"
-  ovirt-populator: "OVIRT_POPULATOR_IMAGE"
-  populator-controller: "POPULATOR_CONTROLLER_IMAGE"
-  ova-provider-server: "OVA_PROVIDER_SERVER_IMAGE"
-  forklift-ova-proxy: "OVA_PROXY_IMAGE"
-  virt-v2v: "VIRT_V2V_IMAGE"
-  virt-v2v-rhel9: "VIRT_V2V_IMAGE_RHEL9"
-  vsphere-copy-offload-populator: "VSPHERE_COPY_OFFLOAD_POPULATOR_IMAGE"
-  vsphere-xcopy-volume-populator: "VSPHERE_XCOPY_VOLUME_POPULATOR_IMAGE"
-  hyperv-provider-server: "HYPERV_PROVIDER_SERVER_IMAGE"
-  deep-inspection: "DEEP_INSPECTION_IMAGE"
-  deep-inspection-rhel9: "DEEP_INSPECTION_IMAGE_RHEL9"
-
 # Component mappings
 # mapping key = Downstream name of the component (e.g. image repository in comet)
 # upstream = Upstream name of the component (e.g. image repository in konflux)
 # origin = git repository URL mappings (from "repositories" config setting)
+# arg = Containerfile-downstream ARG name (used by bundle_sync; mirrors
+#       scripts/component_mappings.conf). Omit for the bundle itself (no ARG).
 cmp_mappings:
   mtv-controller-rhel9:
     upstream: "forklift-controller"
     origin: "forklift"
+    arg: "CONTROLLER_IMAGE"
 
   mtv-must-gather-rhel9:
     upstream: "forklift-must-gather"
     origin: "forklift-must-gather"
+    arg: "MUST_GATHER_IMAGE"
 
   mtv-must-gather-rhel8:
     upstream: "forklift-must-gather"
     origin: "forklift-must-gather"
+    arg: "MUST_GATHER_IMAGE"
 
   mtv-validation-rhel9:
     upstream: "validation"
     origin: "forklift"
+    arg: "VALIDATION_IMAGE"
 
   mtv-api-rhel9:
     upstream: "forklift-api"
     origin: "forklift"
+    arg: "API_IMAGE"
 
   mtv-populator-controller-rhel9:
     upstream: "populator-controller"
     origin: "forklift"
+    arg: "POPULATOR_CONTROLLER_IMAGE"
 
   mtv-rhv-populator-rhel8:
     upstream: "ovirt-populator"
     origin: "forklift"
+    arg: "OVIRT_POPULATOR_IMAGE"
 
   mtv-virt-v2v-rhel9:
     upstream: "virt-v2v-rhel9"
     origin: "forklift"
+    arg: "VIRT_V2V_IMAGE_RHEL9"
 
   mtv-openstack-populator-rhel9:
     upstream: "openstack-populator"
     origin: "forklift"
+    arg: "OPENSTACK_POPULATOR_IMAGE"
 
   mtv-console-plugin-rhel9:
     upstream: "forklift-console-plugin"
     origin: "forklift-console-plugin"
+    arg: "UI_PLUGIN_IMAGE"
 
   mtv-ova-provider-server-rhel9:
     upstream: "ova-provider-server"
     origin: "forklift"
+    arg: "OVA_PROVIDER_SERVER_IMAGE"
 
   mtv-vsphere-copy-offload-populator-rhel9:
     upstream: "vsphere-copy-offload-populator"
     origin: "forklift"
+    arg: "VSPHERE_COPY_OFFLOAD_POPULATOR_IMAGE"
 
   mtv-vsphere-xcopy-volume-populator-rhel9:
     upstream: "vsphere-xcopy-volume-populator"
     origin: "forklift"
+    arg: "VSPHERE_XCOPY_VOLUME_POPULATOR_IMAGE"
 
   mtv-rhel9-operator:
     upstream: "forklift-operator"
     origin: "forklift"
+    arg: "OPERATOR_IMAGE"
 
   mtv-operator-bundle:
     upstream: "forklift-operator-bundle"
@@ -264,23 +273,29 @@ cmp_mappings:
   mtv-cli-download-rhel9:
     upstream: "forklift-cli-download"
     origin: "forklift"
+    arg: "CLI_DOWNLOAD_IMAGE"
 
   mtv-ova-proxy-rhel9:
     upstream: "forklift-ova-proxy"
     origin: "forklift"
+    arg: "OVA_PROXY_IMAGE"
 
   mtv-virt-v2v-rhel10:
     upstream: "virt-v2v"
     origin: "forklift" # use public git because internal breaks auth
+    arg: "VIRT_V2V_IMAGE"
 
   mtv-hyperv-provider-server-rhel9:
     upstream: "hyperv-provider-server"
     origin: "forklift"
+    arg: "HYPERV_PROVIDER_SERVER_IMAGE"
 
   mtv-deep-inspection-rhel10:
     upstream: "deep-inspection"
     origin: "forklift"
+    arg: "DEEP_INSPECTION_IMAGE"
 
   mtv-deep-inspection-rhel9:
     upstream: "deep-inspection-rhel9"
     origin: "forklift"
+    arg: "DEEP_INSPECTION_IMAGE_RHEL9"

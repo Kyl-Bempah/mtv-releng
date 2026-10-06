@@ -249,7 +249,7 @@ class KonfluxStreamResultDTO(BaseModel):
     btrfs_updated: bool = False
     rpa_files_created: int = 0
     pushed: bool = False
-    mr_url: str = ""
+    pr_url: str = ""
     dry_run: bool = False
     skipped: bool = False
     skip_reason: str = ""

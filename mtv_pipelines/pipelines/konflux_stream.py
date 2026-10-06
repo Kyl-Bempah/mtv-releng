@@ -63,6 +63,7 @@ def arg_parse(arg_parser: ArgumentParser):
     arg_parser.add_argument(
         "--registry",
         metavar="REGISTRY",
+        required=False,
         help="[optional] Registry to retarget RPAs to (default: the release namespace from config).",
     )
     arg_parser.add_argument(
@@ -70,12 +71,14 @@ def arg_parse(arg_parser: ArgumentParser):
         dest="run_tox",
         action="store_true",
         default=False,
+        required=False,
         help="[optional] Run the konflux repo's tox suite (~5 min) before pushing.",
     )
     arg_parser.add_argument(
         "--apply",
         action="store_true",
         default=False,
+        required=False,
         help="[optional] Run build-single.sh, commit, and push. Without it, dry-run only.",
     )
 
@@ -290,9 +293,9 @@ async def add_stream(
     git.commit(title)
     git.push(branch=STREAM_BRANCH)
 
-    mr_url = ""
+    pr_url = ""
     try:
-        mr_url = _create_konflux_mr(
+        pr_url = _create_konflux_mr(
             gitlab_auth.token,
             title=title,
             description=(
@@ -301,7 +304,7 @@ async def add_stream(
                 "Automated via the mtv-releng konflux_stream pipeline."
             ),
         )
-        logger.info({"msg": "MR created", "mr_url": mr_url})
+        logger.info({"msg": "MR created", "pr_url": pr_url})
     except (RuntimeError, requests.exceptions.RequestException) as e:
         logger.warning(
             f"Could not auto-create MR ({e}); push succeeded, open it manually "
@@ -316,5 +319,5 @@ async def add_stream(
         btrfs_updated=True,
         rpa_files_created=rpa_count,
         pushed=True,
-        mr_url=mr_url,
+        pr_url=pr_url,
     )

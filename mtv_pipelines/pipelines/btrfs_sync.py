@@ -20,19 +20,6 @@ DESCRIPTION = (
 
 logger = logging.getLogger(__name__)
 
-FORKLIFT_REPO = "https://github.com/kubev2v/forklift.git"
-FORKLIFT_INTERNAL_REPO = "https://gitlab.cee.redhat.com/mtv/forklift.git"
-FETCH_DEPTH = 50
-
-# git settings that make large-repo fetches more reliable (see PR #53)
-_LARGE_REPO_CONFIG = {
-    "http.postBuffer": "524288000",
-    "http.maxRequestBuffer": "100M",
-    "core.preloadindex": "true",
-    "core.fscache": "true",
-    "gc.auto": "256",
-}
-
 
 def arg_parse(arg_parser: ArgumentParser):
     arg_parser.formatter_class = argparse.RawTextHelpFormatter
@@ -56,8 +43,12 @@ async def sync_branch(
 ) -> BtrfsSyncResultDTO:
     branch = args.branch
 
+    btrfs = config.get_btrfs_sync()
+    public_repo = btrfs["public_repo"]
+    fetch_depth = btrfs["fetch_depth"]
+
     try:
-        internal_url = GitlabAuth().authenticated_url(FORKLIFT_INTERNAL_REPO)
+        internal_url = GitlabAuth().authenticated_url(btrfs["internal_repo"])
     except ValueError as e:
         return BtrfsSyncResultDTO(
             branch=branch, skipped=True, skip_reason=str(e)
@@ -66,10 +57,10 @@ async def sync_branch(
     tmp_dir = create_temp_dir(f"btrfs-sync-{branch}")
     git = Git(tmp_dir.name)
 
-    logger.info({"msg": "Cloning (shallow)", "repo": FORKLIFT_REPO})
-    await git.clone(FORKLIFT_REPO, depth=FETCH_DEPTH, single_branch=False)
+    logger.info({"msg": "Cloning (shallow)", "repo": public_repo})
+    await git.clone(public_repo, depth=fetch_depth, single_branch=False)
 
-    for option, value in _LARGE_REPO_CONFIG.items():
+    for option, value in btrfs["large_repo_git_config"].items():
         git.config(option, value)
     git.config("user.email", config.get_git_email())
     git.config("user.name", config.get_git_name())
@@ -93,11 +84,11 @@ async def sync_branch(
     # Targeted, shallow fetch of just this branch; fall back to HTTP/1.1 on failure
     logger.info(f"Fetching branch {branch} from internal")
     try:
-        git.fetch(branch, origin="internal", depth=FETCH_DEPTH)
+        git.fetch(branch, origin="internal", depth=fetch_depth)
     except Exception as e:
         logger.warning(f"Internal fetch failed ({e}); retrying with HTTP/1.1")
         git.config("http.version", "HTTP/1.1")
-        git.fetch(branch, origin="internal", depth=FETCH_DEPTH)
+        git.fetch(branch, origin="internal", depth=fetch_depth)
 
     if git.ref_exists(f"internal/{branch}"):
         logger.info(f"Rebasing onto internal/{branch}")
@@ -107,7 +98,7 @@ async def sync_branch(
 
     if git.ref_exists(f"origin/{branch}"):
         logger.info(f"Fetching and rebasing onto origin/{branch}")
-        git.fetch(branch, origin="origin", depth=FETCH_DEPTH)
+        git.fetch(branch, origin="origin", depth=fetch_depth)
         git.rebase(f"origin/{branch}")
     else:
         logger.info("Branch created from main, skipping origin rebase")
