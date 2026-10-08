@@ -2,6 +2,12 @@
 
 This script updates Containerfile-downstream SHA references with latest snapshot data and creates PRs.
 
+> **Note:** there is now a Python equivalent, the `bundle_sync` pipeline
+> (`python mtv_pipelines/main.py bundle_sync --help`). It is dry-run by default
+> (pass `--apply` to push). The component→ARG mappings below are mirrored in
+> `mtv_pipelines/config/config.yaml` as the `arg:` field on each `cmp_mappings`
+> entry; update both if you add a component while the shell script is still in use.
+
 ## Usage
 
 ```bash

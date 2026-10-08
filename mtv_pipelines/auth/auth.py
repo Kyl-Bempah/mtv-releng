@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from urllib.parse import quote
 
 SLACK_AUTH = "SLACK_AUTH_TOKEN"
 JENKINS_USER = "JENKINS_USER"
@@ -10,6 +11,8 @@ REGISTRY_STAGE_USER = "REGISTRY_STAGE_USER"
 REGISTRY_STAGE_TOKEN = "REGISTRY_STAGE_TOKEN"
 STORAGE_OFFLOAD_CLUSTER_EDGE112 = "STORAGE_OFFLOAD_CLUSTER_EDGE112"
 GITHUB_TOKEN = "GH_TOKEN"
+GITLAB_TOKEN = "GITLAB_TOKEN"
+GITLAB_USER = "GITLAB_USER"
 ROOTCOZ_TOKEN = "ROOTCOZ"
 JIRA_FIXED_IN_BUILD_TOKEN = "JIRA_FIXED_IN_BUILD_TOKEN"
 
@@ -42,6 +45,28 @@ class StorageOffloadClusterAuth:
 
     def __init__(self, password_env: str = STORAGE_OFFLOAD_CLUSTER_EDGE112):
         self.passwd = Auth(password_env).value
+
+
+class GitlabAuth:
+    """Token auth for the internal GitLab mirror.
+
+    GITLAB_TOKEN is required; GITLAB_USER is optional (GitLab accepts the
+    "oauth2" username with a token when no user is set).
+    """
+
+    def __init__(self):
+        self.token = Auth(GITLAB_TOKEN).value
+        self.user = os.getenv(GITLAB_USER) or ""
+
+    def authenticated_url(self, url: str) -> str:
+        prefix = "https://"
+        if not url.startswith(prefix):
+            raise ValueError(f"Expected an https:// GitLab URL, got: {url}")
+        # Percent-encode so reserved chars (e.g. a "/" in the token) can't break
+        # the URL or defeat Git._redact's credential stripping in logs.
+        user = quote(self.user or "oauth2", safe="")
+        token = quote(self.token, safe="")
+        return f"{prefix}{user}:{token}@{url[len(prefix):]}"
 
 
 class RootcozAuth:

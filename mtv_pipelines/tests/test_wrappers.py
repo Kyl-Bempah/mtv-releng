@@ -64,7 +64,7 @@ class TestGit:
         g = Git("/tmp/repo")
         mock_repo = MagicMock()
         # Patch asyncio.to_thread so no real OS thread is spawned; also patch
-        # clone_from so we can verify it is the callable passed to to_thread.
+        # clone_from so we can verify the lambda passed to to_thread calls it.
         with (
             patch("wrappers.git.git.Repo.clone_from", return_value=mock_repo) as m_clone,
             patch(
@@ -74,10 +74,37 @@ class TestGit:
             ) as m_thread,
         ):
             run(g.clone("https://github.com/org/repo"))
-        m_thread.assert_called_once_with(
-            m_clone, "https://github.com/org/repo", "/tmp/repo"
+            # clone() wraps clone_from in a lambda; invoke it to verify the call.
+            thread_callable = m_thread.call_args.args[0]
+            thread_callable()
+        m_clone.assert_called_once_with(
+            "https://github.com/org/repo", "/tmp/repo"
         )
         assert g.repo is mock_repo
+
+    def test_clone_shallow_passes_kwargs(self):
+        g = Git("/tmp/repo")
+        mock_repo = MagicMock()
+        with (
+            patch("wrappers.git.git.Repo.clone_from", return_value=mock_repo) as m_clone,
+            patch(
+                "wrappers.git.asyncio.to_thread",
+                new_callable=AsyncMock,
+                return_value=mock_repo,
+            ) as m_thread,
+        ):
+            run(
+                g.clone(
+                    "https://github.com/org/repo", depth=50, single_branch=False
+                )
+            )
+            m_thread.call_args.args[0]()
+        m_clone.assert_called_once_with(
+            "https://github.com/org/repo",
+            "/tmp/repo",
+            depth=50,
+            no_single_branch=True,
+        )
 
     # -- pull ----------------------------------------------------------------
 

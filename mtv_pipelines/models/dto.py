@@ -206,3 +206,50 @@ class ReversionResultDTO(BaseModel):
     pr_url: str = ""
     skipped: bool = False
     skip_reason: str = ""
+
+
+class BtrfsSyncResultDTO(BaseModel):
+    branch: str
+    created_from_main: bool = False
+    pushed: bool = False
+    dry_run: bool = False
+    skipped: bool = False
+    skip_reason: str = ""
+
+
+class BundleSyncResultDTO(BaseModel):
+    version: str
+    target_branch: str
+    snapshot: str = ""
+    components_updated: int = 0
+    pr_url: str = ""
+    existing_branch: str = ""
+    dry_run: bool = False
+    skipped: bool = False
+    skip_reason: str = ""
+
+
+class BranchingResultDTO(BaseModel):
+    origin: str
+    version: str
+    release_branch: str
+    cf_branch: str
+    release_branch_created: bool = False
+    pr_url: str = ""
+    dry_run: bool = False
+    skipped: bool = False
+    skip_reason: str = ""
+
+
+class KonfluxStreamResultDTO(BaseModel):
+    version: str
+    version_name: str
+    branch: str = ""
+    prod_stream_file: str = ""
+    btrfs_updated: bool = False
+    rpa_files_created: int = 0
+    pushed: bool = False
+    pr_url: str = ""
+    dry_run: bool = False
+    skipped: bool = False
+    skip_reason: str = ""

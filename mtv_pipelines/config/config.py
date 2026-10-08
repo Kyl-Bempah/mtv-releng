@@ -179,3 +179,41 @@ def get_latest_iib_state_path() -> str:
 
 def get_release_conf_path() -> str:
     return _parse_simple("release_conf_path")
+
+
+def get_component_arg_mappings() -> dict:
+    # Bundle sync: upstream component name -> Containerfile-downstream ARG name,
+    # derived from the `arg` field on cmp_mappings entries that carry one.
+    return {
+        entry["upstream"]: entry["arg"]
+        for entry in get_cmp_mappings().values()
+        if entry.get("upstream") and entry.get("arg")
+    }
+
+
+def get_images_conf_path() -> str:
+    return _parse_simple("images_conf_path")
+
+
+def get_btrfs_sync() -> dict:
+    return _parse_simple("btrfs_sync")
+
+
+def get_bundle_sync() -> dict:
+    return _parse_simple("bundle_sync")
+
+
+def get_konflux_stream() -> dict:
+    return _parse_simple("konflux_stream")
+
+
+def get_dev_preview_marker() -> str:
+    return _parse_simple("dev_preview_marker")
+
+
+def get_release_conf_version_keys() -> dict:
+    return _parse_simple("release_conf_version_keys")
+
+
+def get_timeouts() -> dict:
+    return _parse_simple("timeouts")

@@ -165,6 +165,74 @@ allowed_project_keys:
 # Path to the version config file within each origin repository
 release_conf_path: "build/release.conf"
 
+# Branching pipeline: bundle images.conf (forklift only), retargeted at code freeze
+images_conf_path: "build/forklift-operator-bundle/images.conf"
+
+# Marker replaced by the version at code-freeze / stream-add time
+# (e.g. "dev-preview" -> "2-11"), used across .tekton, release manifests, and RPAs.
+dev_preview_marker: "dev-preview"
+
+# branching pipeline: per-origin name of the global-version key in build/release.conf
+release_conf_version_keys:
+  forklift: "MTV_VERSION"
+  forklift-console-plugin: "RVERSION"
+  forklift-must-gather: "VERSION"
+
+# Network/subprocess timeouts (seconds)
+timeouts:
+  http_seconds: 30
+  oc_command_seconds: 120
+  gitlab_mr_connect_seconds: 10
+  gitlab_mr_read_seconds: 60
+
+# btrfs_sync pipeline: public <-> internal forklift mirror settings
+btrfs_sync:
+  public_repo: "https://github.com/kubev2v/forklift.git"
+  internal_repo: "https://gitlab.cee.redhat.com/mtv/forklift.git"
+  fetch_depth: 50
+  # git settings that make large-repo fetches more reliable (see PR #53)
+  large_repo_git_config:
+    http.postBuffer: "524288000"
+    http.maxRequestBuffer: "100M"
+    core.preloadindex: "true"
+    core.fscache: "true"
+    gc.auto: "256"
+
+# bundle_sync pipeline: Containerfile-downstream SHA sync + virt-v2v-int source
+bundle_sync:
+  containerfile_base_url: "https://raw.githubusercontent.com/kubev2v/forklift"
+  containerfile_path: "build/forklift-operator-bundle/Containerfile-downstream"
+  target_repo: "kubev2v/forklift"
+  target_repo_url: "https://github.com/kubev2v/forklift.git"
+  release_target: "stage"
+  pr_title: "chore(automation): Bundle SHA reference update for {version}"
+  # virt-v2v-int image source (built internally, not in the Konflux snapshot)
+  quay_tag_api: "https://quay.io/api/v1/repository/{repo_path}/tag/"
+  virt_v2v_int_repo_path: "redhat-user-workloads/rh-mtv-btrfs-tenant/\
+    forklift-operator-int-{version}/virt-v2v-int-{version}"
+
+# konflux_stream pipeline: konflux-release-data repo + tenant paths
+konflux_stream:
+  host: "https://gitlab.cee.redhat.com"
+  project_path: "releng/konflux-release-data"
+  stream_branch: "mtv_add_stream"
+  mr_target_branch: "main"
+  prod_operator_dir: "tenants-config/cluster/stone-prd-rh01/tenants/\
+    rh-mtv-1-tenant/operator"
+  btrfs_streams: "tenants-config/cluster/stone-prod-p02/tenants/\
+    rh-mtv-btrfs-tenant/streams.yaml"
+  build_single_script: "tenants-config/build-single.sh"
+  # Per-tenant ReleasePlanAdmission dir + filename prefix, built via build_single_script
+  tenants:
+    - build_name: "rh-mtv-1"
+      rpa_dir: "config/stone-prd-rh01.pg1f.p1/product/\
+        ReleasePlanAdmission/rh-mtv-1"
+      rpa_prefix: "forklift-operator-rpa"
+    - build_name: "rh-mtv-btrfs"
+      rpa_dir: "config/stone-prod-p02.hjvn.p1/product/\
+        ReleasePlanAdmission/rh-mtv-btrfs"
+      rpa_prefix: "forklift-operator-int-rpa"
+
 # Forklift "component" repositories
 repositories:
   forklift: "https://github.com/kubev2v/forklift"
@@ -187,62 +255,78 @@ raw_mappings:
 # mapping key = Downstream name of the component (e.g. image repository in comet)
 # upstream = Upstream name of the component (e.g. image repository in konflux)
 # origin = git repository URL mappings (from "repositories" config setting)
+# arg = Containerfile-downstream ARG name (used by bundle_sync; mirrors
+#       scripts/component_mappings.conf). Omit for the bundle itself (no ARG).
 cmp_mappings:
   mtv-controller-rhel9:
     upstream: "forklift-controller"
     origin: "forklift"
+    arg: "CONTROLLER_IMAGE"
 
   mtv-must-gather-rhel9:
     upstream: "forklift-must-gather"
     origin: "forklift-must-gather"
+    arg: "MUST_GATHER_IMAGE"
 
   mtv-must-gather-rhel8:
     upstream: "forklift-must-gather"
     origin: "forklift-must-gather"
+    arg: "MUST_GATHER_IMAGE"
 
   mtv-validation-rhel9:
     upstream: "validation"
     origin: "forklift"
+    arg: "VALIDATION_IMAGE"
 
   mtv-api-rhel9:
     upstream: "forklift-api"
     origin: "forklift"
+    arg: "API_IMAGE"
 
   mtv-populator-controller-rhel9:
     upstream: "populator-controller"
     origin: "forklift"
+    arg: "POPULATOR_CONTROLLER_IMAGE"
 
   mtv-rhv-populator-rhel8:
     upstream: "ovirt-populator"
     origin: "forklift"
+    arg: "OVIRT_POPULATOR_IMAGE"
 
   mtv-virt-v2v-rhel9:
     upstream: "virt-v2v-rhel9"
     origin: "forklift"
+    arg: "VIRT_V2V_IMAGE_RHEL9"
 
   mtv-openstack-populator-rhel9:
     upstream: "openstack-populator"
     origin: "forklift"
+    arg: "OPENSTACK_POPULATOR_IMAGE"
 
   mtv-console-plugin-rhel9:
     upstream: "forklift-console-plugin"
     origin: "forklift-console-plugin"
+    arg: "UI_PLUGIN_IMAGE"
 
   mtv-ova-provider-server-rhel9:
     upstream: "ova-provider-server"
     origin: "forklift"
+    arg: "OVA_PROVIDER_SERVER_IMAGE"
 
   mtv-vsphere-copy-offload-populator-rhel9:
     upstream: "vsphere-copy-offload-populator"
     origin: "forklift"
+    arg: "VSPHERE_COPY_OFFLOAD_POPULATOR_IMAGE"
 
   mtv-vsphere-xcopy-volume-populator-rhel9:
     upstream: "vsphere-xcopy-volume-populator"
     origin: "forklift"
+    arg: "VSPHERE_XCOPY_VOLUME_POPULATOR_IMAGE"
 
   mtv-rhel9-operator:
     upstream: "forklift-operator"
     origin: "forklift"
+    arg: "OPERATOR_IMAGE"
 
   mtv-operator-bundle:
     upstream: "forklift-operator-bundle"
@@ -251,23 +335,29 @@ cmp_mappings:
   mtv-cli-download-rhel9:
     upstream: "forklift-cli-download"
     origin: "forklift"
+    arg: "CLI_DOWNLOAD_IMAGE"
 
   mtv-ova-proxy-rhel9:
     upstream: "forklift-ova-proxy"
     origin: "forklift"
+    arg: "OVA_PROXY_IMAGE"
 
   mtv-virt-v2v-rhel10:
     upstream: "virt-v2v"
     origin: "forklift" # use public git because internal breaks auth
+    arg: "VIRT_V2V_IMAGE"
 
   mtv-hyperv-provider-server-rhel9:
     upstream: "hyperv-provider-server"
     origin: "forklift"
+    arg: "HYPERV_PROVIDER_SERVER_IMAGE"
 
   mtv-deep-inspection-rhel10:
     upstream: "deep-inspection"
     origin: "forklift"
+    arg: "DEEP_INSPECTION_IMAGE"
 
   mtv-deep-inspection-rhel9:
     upstream: "deep-inspection-rhel9"
     origin: "forklift"
+    arg: "DEEP_INSPECTION_IMAGE_RHEL9"
