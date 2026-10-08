@@ -2,8 +2,9 @@ import json
 import logging
 import subprocess
 
+from config import config
+
 COMMAND = ["oc"]
-DEFAULT_TIMEOUT = 120
 
 logger = logging.getLogger(__name__)
 
@@ -19,7 +20,8 @@ class Oc:
     def __init__(self):
         self.cmd = COMMAND.copy()
 
-    def __exec__(self, timeout: int = DEFAULT_TIMEOUT) -> bytes:
+    def __exec__(self, timeout: int | None = None) -> bytes:
+        timeout = timeout or config.get_timeouts()["oc_command_seconds"]
         logger.info(f"Executing {self.cmd}")
         try:
             result = subprocess.run(

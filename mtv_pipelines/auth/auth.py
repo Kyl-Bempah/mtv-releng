@@ -1,5 +1,6 @@
 import os
 from dataclasses import dataclass
+from urllib.parse import quote
 
 SLACK_AUTH = "SLACK_AUTH_TOKEN"
 JENKINS_USER = "JENKINS_USER"
@@ -61,8 +62,11 @@ class GitlabAuth:
         prefix = "https://"
         if not url.startswith(prefix):
             raise ValueError(f"Expected an https:// GitLab URL, got: {url}")
-        creds = f"{self.user}:{self.token}" if self.user else f"oauth2:{self.token}"
-        return f"{prefix}{creds}@{url[len(prefix):]}"
+        # Percent-encode so reserved chars (e.g. a "/" in the token) can't break
+        # the URL or defeat Git._redact's credential stripping in logs.
+        user = quote(self.user or "oauth2", safe="")
+        token = quote(self.token, safe="")
+        return f"{prefix}{user}:{token}@{url[len(prefix):]}"
 
 
 class RootcozAuth:

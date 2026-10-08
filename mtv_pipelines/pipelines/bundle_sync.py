@@ -33,13 +33,6 @@ DESCRIPTION = (
 
 logger = logging.getLogger(__name__)
 
-CONTAINERFILE_BASE_URL = "https://raw.githubusercontent.com/kubev2v/forklift"
-CONTAINERFILE_PATH = "build/forklift-operator-bundle/Containerfile-downstream"
-TARGET_REPO = "kubev2v/forklift"
-TARGET_REPO_URL = "https://github.com/kubev2v/forklift.git"
-RELEASE_TARGET = "stage"
-PR_TITLE = "chore(automation): Bundle SHA reference update for {version}"
-
 
 def arg_parse(arg_parser: ArgumentParser):
     arg_parser.formatter_class = argparse.RawTextHelpFormatter
@@ -63,10 +56,11 @@ def arg_parse(arg_parser: ArgumentParser):
 
 
 def _fetch_raw_containerfile(branch: str) -> str | None:
-    url = f"{CONTAINERFILE_BASE_URL}/{branch}/{CONTAINERFILE_PATH}"
+    bs = config.get_bundle_sync()
+    url = f"{bs['containerfile_base_url']}/{branch}/{bs['containerfile_path']}"
     # raw.githubusercontent.com has a valid public cert; keep TLS verification on
     # (a self-signed cert here would mean interception, not a legit endpoint).
-    resp = requests.get(url, timeout=30)
+    resp = requests.get(url, timeout=config.get_timeouts()["http_seconds"])
     if resp.status_code != 200:
         logger.warning(f"{url} returned {resp.status_code}")
         return None
@@ -75,10 +69,11 @@ def _fetch_raw_containerfile(branch: str) -> str | None:
 
 def _find_existing_sync_pr(version: str, target_branch: str) -> str:
     """Head branch of the newest open sync PR with a matching title, else ''."""
-    title = PR_TITLE.format(version=version)
+    bs = config.get_bundle_sync()
+    title = bs["pr_title"].format(version=version)
     try:
         prs = GHCLI(".").list_open_prs_for_base(
-            base=target_branch, repo=TARGET_REPO
+            base=target_branch, repo=bs["target_repo"]
         )
     except RuntimeError as e:
         logger.warning(f"Could not list open PRs: {e}")
@@ -102,6 +97,7 @@ async def sync_bundle(
     version = args.version
     target_branch = args.target_branch
     dry_run = not args.apply
+    bs = config.get_bundle_sync()
 
     logger.info(
         {
@@ -113,7 +109,7 @@ async def sync_bundle(
     )
 
     oc = Oc()
-    release = oc.latest_release(version, RELEASE_TARGET)
+    release = oc.latest_release(version, bs["release_target"])
     if not release:
         return BundleSyncResultDTO(
             version=version,
@@ -217,7 +213,7 @@ async def sync_bundle(
     # commit, push, and create/update the PR.
     tmp_dir = create_temp_dir(f"bundle-sync-{version}")
     git = Git(tmp_dir.name)
-    await git.clone(TARGET_REPO_URL)
+    await git.clone(bs["target_repo_url"])
     git.config("user.email", config.get_git_email())
     git.config("user.name", config.get_git_name())
     GHCLI(tmp_dir.name).auth()
@@ -282,7 +278,7 @@ async def sync_bundle(
         )
         git.checkout(branch_name, create=True)
 
-    cf_path = os.path.join(tmp_dir.name, CONTAINERFILE_PATH)
+    cf_path = os.path.join(tmp_dir.name, bs["containerfile_path"])
     if not os.path.exists(cf_path):
         return BundleSyncResultDTO(
             version=version,
@@ -290,7 +286,7 @@ async def sync_bundle(
             snapshot=snapshot,
             existing_branch=existing_branch,
             skipped=True,
-            skip_reason=f"Containerfile-downstream not found at {CONTAINERFILE_PATH}",
+            skip_reason=f"Containerfile-downstream not found at {bs['containerfile_path']}",
         )
 
     with open(cf_path) as f:
@@ -311,7 +307,7 @@ async def sync_bundle(
     with open(cf_path, "w") as f:
         f.write(new_content)
 
-    git.add_files([CONTAINERFILE_PATH])
+    git.add_files([bs["containerfile_path"]])
     git.commit(
         "chore(automation): update Containerfile-downstream SHA references "
         "from snapshot\n\n"
@@ -334,8 +330,8 @@ async def sync_bundle(
             "This PR was created automatically by the mtv-releng pipeline."
         )
         GHCLI(tmp_dir.name).create_pr_for_repo(
-            repo=TARGET_REPO,
-            title=PR_TITLE.format(version=version),
+            repo=bs["target_repo"],
+            title=bs["pr_title"].format(version=version),
             body=body,
             base=target_branch,
             head=branch_name,

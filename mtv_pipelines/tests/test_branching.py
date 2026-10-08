@@ -82,7 +82,7 @@ class TestRenderReleaseConf:
 class TestTransformTektonContent:
     def test_retargets_branch_and_stream(self):
         src = 'on-cel: "main"\napp: forklift-operator-dev-preview\n'
-        out = transform_tekton_content(src, "2-11", "2.11")
+        out = transform_tekton_content(src, "2-11", "2.11", "dev-preview")
         assert '"release-2.11"' in out
         assert "forklift-operator-2-11" in out
         assert "dev-preview" not in out
@@ -98,7 +98,7 @@ class TestTransformProdStream:
             "spec:\n"
             '  revision: "main"\n'
         )
-        out = transform_prod_stream(src, "2-11", "2.11")
+        out = transform_prod_stream(src, "2-11", "2.11", "dev-preview")
         assert "forklift-operator-2-11" in out
         assert 'revision: "release-2.11"' in out
         assert (
@@ -129,7 +129,10 @@ class TestTransformRpa:
             "registry: mtv-candidate\n"
             '      product_version: "9.99"\n'
         )
-        out = transform_rpa(src, "2-11", "migration-toolkit-virtualization", "2.11")
+        out = transform_rpa(
+            src, "2-11", "migration-toolkit-virtualization", "2.11",
+            "dev-preview", "mtv-candidate",
+        )
         assert "dev-preview" not in out
         assert "mtv-candidate" not in out
         assert "migration-toolkit-virtualization" in out

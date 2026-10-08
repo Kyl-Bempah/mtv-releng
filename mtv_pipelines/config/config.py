@@ -197,3 +197,23 @@ def get_images_conf_path() -> str:
 
 def get_btrfs_sync() -> dict:
     return _parse_simple("btrfs_sync")
+
+
+def get_bundle_sync() -> dict:
+    return _parse_simple("bundle_sync")
+
+
+def get_konflux_stream() -> dict:
+    return _parse_simple("konflux_stream")
+
+
+def get_dev_preview_marker() -> str:
+    return _parse_simple("dev_preview_marker")
+
+
+def get_release_conf_version_keys() -> dict:
+    return _parse_simple("release_conf_version_keys")
+
+
+def get_timeouts() -> dict:
+    return _parse_simple("timeouts")

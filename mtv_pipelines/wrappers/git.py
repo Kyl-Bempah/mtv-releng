@@ -1,18 +1,26 @@
 import asyncio
 import logging
-import re
 from typing import Any, Dict, List
 
 import git
 
 logger = logging.getLogger(__name__)
 
-_URL_CREDS = re.compile(r"(://)[^/@]+@")
-
 
 def _redact(url: str) -> str:
-    """Strip any user:token@ userinfo so credentials never reach the logs."""
-    return _URL_CREDS.sub(r"\1", url)
+    """Strip any user:token@ userinfo from a URL so creds never reach the logs.
+
+    Parses rather than regexes: userinfo only lives in the netloc (before the
+    first "/"), so stripping everything up to the last "@" there handles tokens
+    with any characters (e.g. an unencoded "/" or "@") without touching the path.
+    """
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        return url
+    netloc, slash, path = rest.partition("/")
+    if "@" in netloc:
+        netloc = netloc.rsplit("@", 1)[1]
+    return f"{scheme}{sep}{netloc}{slash}{path}"
 
 
 class Git:

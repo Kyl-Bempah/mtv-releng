@@ -14,15 +14,10 @@ from dataclasses import dataclass
 
 import requests
 
+from config import config
 from wrappers.skopeo import Skopeo
 
 logger = logging.getLogger(__name__)
-
-QUAY_TAG_API = "https://quay.io/api/v1/repository/{repo_path}/tag/"
-VIRT_V2V_INT_REPO_PATH = (
-    "redhat-user-workloads/rh-mtv-btrfs-tenant/"
-    "forklift-operator-int-{version}/virt-v2v-int-{version}"
-)
 
 _SHA_RE = re.compile(r"^[a-f0-9]{64}$")
 # VIRT_V2V_IMAGE line must not match VIRT_V2V_IMAGE_RHEL9 (stops before _RHEL9).
@@ -202,15 +197,16 @@ def get_latest_virt_v2v_int_sha(version: str) -> str:
     if not version:
         raise ValueError("Version is required to fetch virt-v2v-int SHA")
 
-    repo_path = VIRT_V2V_INT_REPO_PATH.format(version=version)
+    bs = config.get_bundle_sync()
+    repo_path = bs["virt_v2v_int_repo_path"].format(version=version)
     image_base = f"quay.io/{repo_path}"
-    api_url = QUAY_TAG_API.format(repo_path=repo_path)
+    api_url = bs["quay_tag_api"].format(repo_path=repo_path)
 
     logger.info(
         f"Fetching latest virt-v2v-int SHA for version {version} "
         f"(repo: {image_base})"
     )
-    resp = requests.get(api_url, timeout=30)
+    resp = requests.get(api_url, timeout=config.get_timeouts()["http_seconds"])
     if resp.status_code != 200:
         raise RuntimeError(
             f"Failed to fetch tags from Quay.io API "

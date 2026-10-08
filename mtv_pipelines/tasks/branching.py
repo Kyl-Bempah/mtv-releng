@@ -18,14 +18,6 @@ from wrappers.gh_cli import GHCLI
 
 logger = logging.getLogger(__name__)
 
-# release.conf differs per repo only in the name of the global version key and
-# whether it carries OCP_VERSIONS (forklift does, the others do not).
-_VERSION_KEY = {
-    "forklift": "MTV_VERSION",
-    "forklift-console-plugin": "RVERSION",
-    "forklift-must-gather": "VERSION",
-}
-
 
 def mtv_version_parts(version: str) -> tuple[str, str]:
     """(xy, version_name) for an x.y.z version, e.g. "2.11.0" -> ("2.11", "2-11")."""
@@ -42,8 +34,12 @@ def render_release_conf(
     registry: str,
     ocp_versions: str,
 ) -> str:
-    """Regenerate build/release.conf for *origin* (matches the shell heredocs)."""
-    version_key = _VERSION_KEY.get(origin)
+    """Regenerate build/release.conf for *origin* (matches the shell heredocs).
+
+    The per-origin global-version key (MTV_VERSION/RVERSION/VERSION) comes from
+    the release_conf_version_keys config map; only forklift carries OCP_VERSIONS.
+    """
+    version_key = config.get_release_conf_version_keys().get(origin)
     if version_key is None:
         raise ValueError(f"No release.conf template for origin '{origin}'")
     xy, _ = mtv_version_parts(version)
@@ -76,14 +72,16 @@ def render_release_conf(
     return "\n".join(lines) + "\n"
 
 
-def transform_tekton_content(content: str, version_name: str, xy: str) -> str:
-    """Retarget a .tekton file from dev-preview/main to the release stream.
+def transform_tekton_content(
+    content: str, version_name: str, xy: str, marker: str
+) -> str:
+    """Retarget a .tekton file from marker/main to the release stream.
 
     Mirrors the two sed passes in process_repo: on-cel branch filter
-    ``"main"`` -> ``"release-X.Y"``, then every ``dev-preview`` -> version_name.
+    ``"main"`` -> ``"release-X.Y"``, then every *marker* -> version_name.
     """
     content = content.replace('"main"', f'"release-{xy}"')
-    content = content.replace("dev-preview", version_name)
+    content = content.replace(marker, version_name)
     return content
 
 
@@ -152,6 +150,7 @@ async def branch_one(
     git.checkout(cf_branch, create=True)
 
     root = repo.tmp_dir.name
+    marker = config.get_dev_preview_marker()
 
     conf_path = os.path.join(root, config.get_release_conf_path())
     with open(conf_path, "w") as f:
@@ -175,14 +174,16 @@ async def branch_one(
             if not os.path.isfile(old):
                 continue
             new = os.path.join(
-                tekton_dir, name.replace("dev-preview", version_name)
+                tekton_dir, name.replace(marker, version_name)
             )
             if new != old:
                 os.rename(old, new)
             with open(new) as f:
                 content = f.read()
             with open(new, "w") as f:
-                f.write(transform_tekton_content(content, version_name, xy))
+                f.write(
+                    transform_tekton_content(content, version_name, xy, marker)
+                )
             tekton_count += 1
 
     images_conf_path = config.get_images_conf_path()
@@ -197,7 +198,7 @@ async def branch_one(
             with open(images_path) as f:
                 images = f.read()
             with open(images_path, "w") as f:
-                f.write(images.replace("dev-preview", version_name))
+                f.write(images.replace(marker, version_name))
             paths.append(images_conf_path)
 
     if dry_run:

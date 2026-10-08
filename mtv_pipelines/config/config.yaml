@@ -168,6 +168,23 @@ release_conf_path: "build/release.conf"
 # Branching pipeline: bundle images.conf (forklift only), retargeted at code freeze
 images_conf_path: "build/forklift-operator-bundle/images.conf"
 
+# Marker replaced by the version at code-freeze / stream-add time
+# (e.g. "dev-preview" -> "2-11"), used across .tekton, release manifests, and RPAs.
+dev_preview_marker: "dev-preview"
+
+# branching pipeline: per-origin name of the global-version key in build/release.conf
+release_conf_version_keys:
+  forklift: "MTV_VERSION"
+  forklift-console-plugin: "RVERSION"
+  forklift-must-gather: "VERSION"
+
+# Network/subprocess timeouts (seconds)
+timeouts:
+  http_seconds: 30
+  oc_command_seconds: 120
+  gitlab_mr_connect_seconds: 10
+  gitlab_mr_read_seconds: 60
+
 # btrfs_sync pipeline: public <-> internal forklift mirror settings
 btrfs_sync:
   public_repo: "https://github.com/kubev2v/forklift.git"
@@ -180,6 +197,41 @@ btrfs_sync:
     core.preloadindex: "true"
     core.fscache: "true"
     gc.auto: "256"
+
+# bundle_sync pipeline: Containerfile-downstream SHA sync + virt-v2v-int source
+bundle_sync:
+  containerfile_base_url: "https://raw.githubusercontent.com/kubev2v/forklift"
+  containerfile_path: "build/forklift-operator-bundle/Containerfile-downstream"
+  target_repo: "kubev2v/forklift"
+  target_repo_url: "https://github.com/kubev2v/forklift.git"
+  release_target: "stage"
+  pr_title: "chore(automation): Bundle SHA reference update for {version}"
+  # virt-v2v-int image source (built internally, not in the Konflux snapshot)
+  quay_tag_api: "https://quay.io/api/v1/repository/{repo_path}/tag/"
+  virt_v2v_int_repo_path: "redhat-user-workloads/rh-mtv-btrfs-tenant/\
+    forklift-operator-int-{version}/virt-v2v-int-{version}"
+
+# konflux_stream pipeline: konflux-release-data repo + tenant paths
+konflux_stream:
+  host: "https://gitlab.cee.redhat.com"
+  project_path: "releng/konflux-release-data"
+  stream_branch: "mtv_add_stream"
+  mr_target_branch: "main"
+  prod_operator_dir: "tenants-config/cluster/stone-prd-rh01/tenants/\
+    rh-mtv-1-tenant/operator"
+  btrfs_streams: "tenants-config/cluster/stone-prod-p02/tenants/\
+    rh-mtv-btrfs-tenant/streams.yaml"
+  build_single_script: "tenants-config/build-single.sh"
+  # Per-tenant ReleasePlanAdmission dir + filename prefix, built via build_single_script
+  tenants:
+    - build_name: "rh-mtv-1"
+      rpa_dir: "config/stone-prd-rh01.pg1f.p1/product/\
+        ReleasePlanAdmission/rh-mtv-1"
+      rpa_prefix: "forklift-operator-rpa"
+    - build_name: "rh-mtv-btrfs"
+      rpa_dir: "config/stone-prod-p02.hjvn.p1/product/\
+        ReleasePlanAdmission/rh-mtv-btrfs"
+      rpa_prefix: "forklift-operator-int-rpa"
 
 # Forklift "component" repositories
 repositories:

@@ -15,14 +15,16 @@ _PAC_NO_MR_LINE = "    build.appstudio.openshift.io/request: configure-pac-no-mr
 _PRODUCT_VERSION_RE = re.compile(r'      product_version: "[0-9]+\.[0-9]+"')
 
 
-def transform_prod_stream(content: str, version_name: str, xy: str) -> str:
-    """Turn operator/dev-preview.yaml into this version's rendered stream.
+def transform_prod_stream(
+    content: str, version_name: str, xy: str, marker: str
+) -> str:
+    """Turn operator/<marker>.yaml into this version's rendered stream.
 
-    Mirrors the three sed passes: dev-preview -> version_name, retarget
+    Mirrors the three sed passes: *marker* -> version_name, retarget
     ``revision: "main"`` -> the release branch, and append the configure-pac-no-mr
     request annotation after every pipeline annotation line.
     """
-    content = content.replace("dev-preview", version_name)
+    content = content.replace(marker, version_name)
     content = content.replace('revision: "main"', f'revision: "release-{xy}"')
 
     out: list[str] = []
@@ -55,15 +57,20 @@ def build_btrfs_pds_block(version_name: str, xy: str) -> str:
 
 
 def transform_rpa(
-    content: str, version_name: str, registry: str, xy: str
+    content: str,
+    version_name: str,
+    registry: str,
+    xy: str,
+    marker: str,
+    dev_registry: str,
 ) -> str:
-    """Retarget a ReleasePlanAdmission from dev-preview to this version.
+    """Retarget a ReleasePlanAdmission from the marker/dev stream to this version.
 
-    dev-preview -> version_name, mtv-candidate -> the release registry, and the
+    *marker* -> version_name, *dev_registry* -> the release registry, and the
     product_version bumped to the X.Y stream.
     """
-    content = content.replace("dev-preview", version_name)
-    content = content.replace("mtv-candidate", registry)
+    content = content.replace(marker, version_name)
+    content = content.replace(dev_registry, registry)
     content = _PRODUCT_VERSION_RE.sub(
         f'      product_version: "{xy}"', content
     )
