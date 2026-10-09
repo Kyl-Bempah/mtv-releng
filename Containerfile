@@ -23,3 +23,15 @@ RUN (type -p wget >/dev/null || (apt update && apt install wget -y)) \
 	&& echo "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/githubcli-archive-keyring.gpg] https://cli.github.com/packages stable main" | tee /etc/apt/sources.list.d/github-cli.list > /dev/null \
 	&& apt update \
 	&& apt install gh -y
+
+# kustomize >= v5.7.1 — required by the konflux_stream pipeline's build-single.sh
+RUN apt-get update && apt-get -y install curl \
+	&& curl -sfL "https://raw.githubusercontent.com/kubernetes-sigs/kustomize/master/hack/install_kustomize.sh" \
+	   | bash -s 5.7.1 /usr/local/bin \
+	&& kustomize version
+
+# yq (mikefarah/yq v4) — required by build-single.sh's ensure-releaseplan-authors.sh
+RUN wget -qO /usr/local/bin/yq \
+	"https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture)" \
+	&& chmod +x /usr/local/bin/yq \
+	&& yq --version
