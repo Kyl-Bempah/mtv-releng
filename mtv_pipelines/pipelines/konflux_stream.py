@@ -167,12 +167,14 @@ async def add_stream(
             f"{ks['host']}/{ks['project_path']}.git"
         )
     except ValueError as e:
+        # Most commonly GITLAB_TOKEN missing from the env; this pipeline needs it
+        # even for a dry-run (it clones the internal GitLab repo up front).
         return KonfluxStreamResultDTO(
             version=args.version,
             version_name=version_name,
             dry_run=dry_run,
             skipped=True,
-            skip_reason=str(e),
+            skip_reason=f"GitLab auth failed (is GITLAB_TOKEN set?): {e}",
         )
 
     logger.info(
@@ -264,11 +266,39 @@ async def add_stream(
     for tenant in ks["tenants"]:
         build_name = tenant["build_name"]
         logger.info(f"Building manifests for {build_name}")
-        subprocess.run(
+        # Capture output: build-single.sh needs the konflux toolchain (kustomize,
+        # etc.) which this image may not carry; surface its error instead of a
+        # bare non-zero exit, and skip rather than crashing the whole run.
+        result = subprocess.run(
             ["bash", ks["build_single_script"], build_name],
             cwd=root,
-            check=True,
+            capture_output=True,
+            text=True,
         )
+        if result.returncode != 0:
+            logger.error(
+                {
+                    "msg": "build-single.sh failed",
+                    "tenant": build_name,
+                    "stdout_tail": (result.stdout or "").strip()[-1500:],
+                    "stderr_tail": (result.stderr or "").strip()[-1500:],
+                }
+            )
+            return KonfluxStreamResultDTO(
+                version=args.version,
+                version_name=version_name,
+                branch=stream_branch,
+                prod_stream_file=prod_stream_rel,
+                btrfs_updated=True,
+                rpa_files_created=rpa_count,
+                skipped=True,
+                skip_reason=(
+                    f"build-single.sh failed for {build_name} (exit "
+                    f"{result.returncode}); needs the konflux build toolchain "
+                    f"(e.g. kustomize). stderr: "
+                    f"{(result.stderr or '').strip()[-300:]}"
+                ),
+            )
 
     if args.run_tox:
         logger.info("Running tox (required by the konflux repo to merge)")

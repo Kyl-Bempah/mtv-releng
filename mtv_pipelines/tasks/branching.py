@@ -145,7 +145,28 @@ async def branch_one(
         git.checkout(release_branch, create=True)
         release_branch_created = True
         if not dry_run:
-            git.push(branch=release_branch)
+            try:
+                git.push(branch=release_branch)
+            except RuntimeError as e:
+                # Protected release-* branches (branch ruleset / required status
+                # checks) reject a direct bot push. Skip this repo with guidance
+                # rather than crashing the whole run; create the branch via an
+                # allowed path (admin/bypass or the GitHub UI from main), then
+                # re-run — the reuse path above will open the code-freeze PR.
+                logger.warning(
+                    f"[{origin}] Could not push {release_branch}: {e}"
+                )
+                return base.model_copy(
+                    update={
+                        "skipped": True,
+                        "skip_reason": (
+                            f"Could not create {release_branch} on origin "
+                            f"(likely branch protection/ruleset). Create it from "
+                            f"main manually, then re-run to open the code-freeze "
+                            f"PR. Error: {e}"
+                        ),
+                    }
+                )
 
     git.checkout(cf_branch, create=True)
 
