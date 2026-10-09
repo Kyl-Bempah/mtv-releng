@@ -156,6 +156,7 @@ async def add_stream(
 
     registry = args.registry or config.get_release_namespace()
     ks = config.get_konflux_stream()
+    timeouts = config.get_timeouts()
     stream_branch = ks["stream_branch"]
     prod_operator_dir = ks["prod_operator_dir"]
     marker = config.get_dev_preview_marker()
@@ -269,12 +270,28 @@ async def add_stream(
         # Capture output: build-single.sh needs the konflux toolchain (kustomize,
         # etc.) which this image may not carry; surface its error instead of a
         # bare non-zero exit, and skip rather than crashing the whole run.
-        result = subprocess.run(
-            ["bash", ks["build_single_script"], build_name],
-            cwd=root,
-            capture_output=True,
-            text=True,
-        )
+        try:
+            result = subprocess.run(
+                ["bash", ks["build_single_script"], build_name],
+                cwd=root,
+                capture_output=True,
+                text=True,
+                timeout=timeouts["build_single_seconds"],
+            )
+        except subprocess.TimeoutExpired:
+            return KonfluxStreamResultDTO(
+                version=args.version,
+                version_name=version_name,
+                branch=stream_branch,
+                prod_stream_file=prod_stream_rel,
+                btrfs_updated=True,
+                rpa_files_created=rpa_count,
+                skipped=True,
+                skip_reason=(
+                    f"build-single.sh for {build_name} timed out after "
+                    f"{timeouts['build_single_seconds']}s"
+                ),
+            )
         if result.returncode != 0:
             logger.error(
                 {
@@ -302,7 +319,21 @@ async def add_stream(
 
     if args.run_tox:
         logger.info("Running tox (required by the konflux repo to merge)")
-        result = subprocess.run(["tox"], cwd=root)
+        try:
+            result = subprocess.run(
+                ["tox"], cwd=root, timeout=timeouts["tox_seconds"]
+            )
+        except subprocess.TimeoutExpired:
+            return KonfluxStreamResultDTO(
+                version=args.version,
+                version_name=version_name,
+                branch=stream_branch,
+                prod_stream_file=prod_stream_rel,
+                btrfs_updated=True,
+                rpa_files_created=rpa_count,
+                skipped=True,
+                skip_reason=f"tox timed out after {timeouts['tox_seconds']}s",
+            )
         if result.returncode != 0:
             return KonfluxStreamResultDTO(
                 version=args.version,

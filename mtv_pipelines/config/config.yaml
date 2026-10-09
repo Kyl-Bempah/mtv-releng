@@ -184,6 +184,8 @@ timeouts:
   oc_command_seconds: 120
   gitlab_mr_connect_seconds: 10
   gitlab_mr_read_seconds: 60
+  build_single_seconds: 600
+  tox_seconds: 900
 
 # btrfs_sync pipeline: public <-> internal forklift mirror settings
 btrfs_sync:
