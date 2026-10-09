@@ -157,6 +157,20 @@ class Pipeline:
         except Exception as e:
             logger.error(f"Failed to set task_run output_data: {e}")
 
+    @staticmethod
+    def _log_skips(task: Task, output_data):
+        """Surface any skipped result(s) so a no-op run is never silent."""
+        items = output_data if isinstance(output_data, list) else [output_data]
+        for item in items:
+            if getattr(item, "skipped", False):
+                logger.warning(
+                    {
+                        "msg": f"{task} | Skipped",
+                        "reason": getattr(item, "skip_reason", "")
+                        or "(no reason given)",
+                    }
+                )
+
     async def _run_task(self, task: Task):
         logger.info(f"{task} | Started")
         logger.debug(f"{task} | input_model: {task.input_model}")
@@ -209,6 +223,7 @@ class Pipeline:
         self._artifactory.put(task.name, output_data)
         logger.debug(f"{task} | output_data: {output_data}")
         self._set_task_run_output(task.name, output_data)
+        self._log_skips(task, output_data)
         task.status = TaskStatus.FINISHED
         logger.info(f"{task} | Finished")
         self._update_task_run(

@@ -47,9 +47,11 @@ make install   # runs poetry install
 
 **Run a pipeline:**
 ```bash
-make run PIPELINE=<pipeline_name> ARGS="..."
-# or directly:
-poetry run python mtv_pipelines/main.py <pipeline> [options]
+# The pipeline name is the first token of ARGS (there is no PIPELINE variable):
+make run ARGS="<pipeline_name> [options]"
+# e.g. make run ARGS="branching 5.0.0 --ocp-versions v4.22-v5.0"
+# or directly (outside the container):
+poetry run python mtv_pipelines/main.py <pipeline_name> [options]
 ```
 
 **Run inside the container:**
