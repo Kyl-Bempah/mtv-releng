@@ -15,7 +15,12 @@ PROTOCOL = "docker://"
 # registry signatures for a genuinely-absent image/tag (NOT auth/network).
 # Kept narrow on purpose: a broad "not found" would also match a missing
 # "command not found" binary and misclassify it as an absent image.
-_NOT_FOUND_SIGNATURES = ("manifest unknown", "name unknown")
+# "deleted or has expired" is quay's message for a GC'd (time-machine) tag.
+_NOT_FOUND_SIGNATURES = (
+    "manifest unknown",
+    "name unknown",
+    "deleted or has expired",
+)
 
 
 logger = logging.getLogger(__name__)
