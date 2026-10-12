@@ -217,3 +217,7 @@ def get_release_conf_version_keys() -> dict:
 
 def get_timeouts() -> dict:
     return _parse_simple("timeouts")
+
+
+def get_konflux_clusters() -> dict:
+    return _parse_simple("konflux_clusters")

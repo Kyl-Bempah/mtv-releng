@@ -6,6 +6,7 @@ from argparse import ArgumentParser, Namespace
 from asyncio import TaskGroup
 
 import requests
+from auth.auth import Auth
 from config import config
 from core.task import task
 from models.dto import BundleSyncResultDTO
@@ -109,7 +110,42 @@ async def sync_bundle(
     )
 
     oc = Oc()
-    release = oc.latest_release(version, bs["release_target"])
+    # Log into the service cluster (rh-mtv-1) where forklift-operator releases
+    # live, using KONFLUX_SERVICE_TOKEN (mirrors the scripts' ensure_oc_login).
+    svc = config.get_konflux_clusters()["service"]
+    try:
+        oc.ensure_login(svc["server"], Auth(svc["token_env"]).value)
+    except ValueError as e:
+        return BundleSyncResultDTO(
+            version=version,
+            target_branch=target_branch,
+            dry_run=dry_run,
+            skipped=True,
+            skip_reason=(
+                f"{svc['token_env']} not set; cannot log into {svc['server']}: {e}"
+            ),
+        )
+    except RuntimeError as e:
+        return BundleSyncResultDTO(
+            version=version,
+            target_branch=target_branch,
+            dry_run=dry_run,
+            skipped=True,
+            skip_reason=f"oc login failed: {e}",
+        )
+
+    # oc must be installed and logged into the cluster; surface either problem as
+    # a clean skip instead of an unhandled TaskGroup crash.
+    try:
+        release = oc.latest_release(version, bs["release_target"])
+    except RuntimeError as e:
+        return BundleSyncResultDTO(
+            version=version,
+            target_branch=target_branch,
+            dry_run=dry_run,
+            skipped=True,
+            skip_reason=f"oc query failed (installed and logged in?): {e}",
+        )
     if not release:
         return BundleSyncResultDTO(
             version=version,

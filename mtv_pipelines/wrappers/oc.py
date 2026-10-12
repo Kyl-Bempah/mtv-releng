@@ -27,6 +27,11 @@ class Oc:
             result = subprocess.run(
                 self.cmd, capture_output=True, timeout=timeout
             )
+        except FileNotFoundError:
+            raise RuntimeError(
+                f"`{self.cmd[0]}` not found on PATH; is the OpenShift CLI "
+                "installed in the image?"
+            )
         except subprocess.TimeoutExpired:
             raise RuntimeError(
                 f"`oc` timed out after {timeout}s: {' '.join(self.cmd)}"
@@ -36,6 +41,44 @@ class Oc:
             return result.stdout
         except subprocess.CalledProcessError:
             raise RuntimeError(result.stderr.decode("utf-8"))
+
+    def current_server(self) -> str:
+        """The cluster the current session is logged into, or '' if none."""
+        self.cmd = COMMAND + ["whoami", "--show-server"]
+        try:
+            return self.__exec__().decode("utf-8").strip()
+        except RuntimeError:
+            return ""
+
+    def login(self, server: str, token: str) -> None:
+        """`oc login --token=... --server=...`; never logs the token."""
+        logger.info(f"Logging into {server}")
+        try:
+            result = subprocess.run(
+                COMMAND + ["login", f"--token={token}", f"--server={server}"],
+                capture_output=True,
+                timeout=config.get_timeouts()["oc_command_seconds"],
+            )
+        except FileNotFoundError:
+            raise RuntimeError(
+                "`oc` not found on PATH; is the OpenShift CLI installed in the image?"
+            )
+        except subprocess.TimeoutExpired:
+            raise RuntimeError(f"`oc login` to {server} timed out")
+        if result.returncode != 0:
+            raise RuntimeError(
+                f"oc login to {server} failed: "
+                f"{result.stderr.decode('utf-8').strip()}"
+            )
+
+    def ensure_login(self, server: str, token: str) -> None:
+        """Reuse an existing session for this cluster, else log in.
+
+        Port of util.sh's ensure_oc_login.
+        """
+        if self.current_server() == server:
+            return
+        self.login(server, token)
 
     # Mirrors latest_release.sh: newest Succeeded release for the version/target.
     def latest_release(

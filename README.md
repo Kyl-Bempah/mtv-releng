@@ -66,7 +66,10 @@ make run        # run the container
 | Variable | Purpose |
 |----------|---------|
 | `SLACK_AUTH_TOKEN` | Slack Bot token |
-| `GH_TOKEN` | GitHub personal access token |
+| `GH_TOKEN` | GitHub personal access token (push + PRs to kubev2v repos) |
+| `GITLAB_TOKEN` / `GITLAB_USER` | GitLab token (`write_repository` + `api`) and optional user for `btrfs_sync` (mtv/forklift) and `konflux_stream` (konflux-release-data) |
+| `KONFLUX_SERVICE_TOKEN` | `oc login` token for the service cluster (rh-mtv-1); used by `bundle_sync` to read releases/snapshots |
+| `KONFLUX_BTRFS_TOKEN` | `oc login` token for the btrfs cluster (rh-mtv-btrfs) |
 | `JENKINS_USER` | Jenkins username |
 | `JENKINS_TOKEN` | Jenkins API token |
 | `REGISTRY_PROD_USER` / `REGISTRY_PROD_TOKEN` | Production registry credentials |
