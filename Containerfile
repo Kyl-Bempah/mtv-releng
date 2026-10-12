@@ -35,3 +35,13 @@ RUN wget -qO /usr/local/bin/yq \
 	"https://github.com/mikefarah/yq/releases/latest/download/yq_linux_$(dpkg --print-architecture)" \
 	&& chmod +x /usr/local/bin/yq \
 	&& yq --version
+
+# oc (OpenShift CLI) — required by bundle_sync (oc get releases/snapshots).
+# Must still be logged into the cluster at runtime.
+RUN case "$(dpkg --print-architecture)" in \
+	    amd64) oc_url="https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux.tar.gz" ;; \
+	    arm64) oc_url="https://mirror.openshift.com/pub/openshift-v4/clients/ocp/stable/openshift-client-linux-arm64.tar.gz" ;; \
+	    *) echo "unsupported arch for oc: $(dpkg --print-architecture)" >&2; exit 1 ;; \
+	  esac \
+	&& curl -sfL "$oc_url" | tar -xz -C /usr/local/bin oc \
+	&& oc version --client
