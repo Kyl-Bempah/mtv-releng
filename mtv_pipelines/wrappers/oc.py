@@ -43,10 +43,18 @@ class Oc:
             raise RuntimeError(result.stderr.decode("utf-8"))
 
     def current_server(self) -> str:
-        """The cluster the current session is logged into, or '' if none."""
+        """The cluster the current session is logged into, or '' if none.
+
+        `whoami --show-server` only reads the configured server and succeeds even
+        for an expired session, so also run plain `whoami` to confirm the session
+        is still valid (mirrors util.sh's ensure_oc_login dual check).
+        """
         self.cmd = COMMAND + ["whoami", "--show-server"]
         try:
-            return self.__exec__().decode("utf-8").strip()
+            server = self.__exec__().decode("utf-8").strip()
+            self.cmd = COMMAND + ["whoami"]
+            self.__exec__()
+            return server
         except RuntimeError:
             return ""
 
