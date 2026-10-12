@@ -109,10 +109,11 @@ async def sync_bundle(
         }
     )
 
-    oc = Oc()
     # Log into the service cluster (rh-mtv-1) where forklift-operator releases
     # live, using KONFLUX_SERVICE_TOKEN (mirrors the scripts' ensure_oc_login).
+    # Scope oc to the tenant namespace; a token login lands in the wrong project.
     svc = config.get_konflux_clusters()["service"]
+    oc = Oc(namespace=svc.get("namespace"))
     try:
         oc.ensure_login(svc["server"], Auth(svc["token_env"]).value)
     except ValueError as e:

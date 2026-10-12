@@ -193,9 +193,11 @@ konflux_clusters:
   service:
     server: "https://api.stone-prd-rh01.pg1f.p1.openshiftapps.com:6443"
     token_env: "KONFLUX_SERVICE_TOKEN"
+    namespace: "rh-mtv-1-tenant"
   btrfs:
     server: "https://api.stone-prod-p02.hjvn.p1.openshiftapps.com:6443"
     token_env: "KONFLUX_BTRFS_TOKEN"
+    namespace: "rh-mtv-btrfs-tenant"
 
 # btrfs_sync pipeline: public <-> internal forklift mirror settings
 btrfs_sync:

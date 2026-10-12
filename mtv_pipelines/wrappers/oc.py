@@ -17,8 +17,15 @@ class Oc:
     cluster (same assumption the shell scripts make).
     """
 
-    def __init__(self):
+    def __init__(self, namespace: str | None = None):
         self.cmd = COMMAND.copy()
+        # A fresh token login lands in the token's default project, so `oc get`
+        # must be scoped explicitly or it queries the wrong namespace and returns
+        # nothing (the shell relied on the human's current project instead).
+        self.namespace = namespace
+
+    def _ns(self) -> list[str]:
+        return ["-n", self.namespace] if self.namespace else []
 
     def __exec__(self, timeout: int | None = None) -> bytes:
         timeout = timeout or config.get_timeouts()["oc_command_seconds"]
@@ -96,6 +103,7 @@ class Oc:
         self.cmd.extend(
             ["get", "releases", "--sort-by={.metadata.creationTimestamp}"]
         )
+        self.cmd.extend(self._ns())
         output = self.__exec__().decode("utf-8")
 
         # Trailing "-" bounds the version so e.g. "2-11" doesn't match "2-110"
@@ -115,6 +123,7 @@ class Oc:
     def snapshot_from_release(self, release: str) -> str:
         self.cmd = COMMAND.copy()
         self.cmd.extend(["get", "-o", "json", "release", release])
+        self.cmd.extend(self._ns())
         data = json.loads(self.__exec__())
         return data.get("spec", {}).get("snapshot", "")
 
@@ -122,6 +131,7 @@ class Oc:
     def snapshot_content(self, snapshot: str) -> list[dict]:
         self.cmd = COMMAND.copy()
         self.cmd.extend(["get", "-o", "json", "snapshot", snapshot])
+        self.cmd.extend(self._ns())
         data = json.loads(self.__exec__())
         components = [
             {"name": c.get("name"), "containerImage": c.get("containerImage")}
