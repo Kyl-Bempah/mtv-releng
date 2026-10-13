@@ -85,6 +85,21 @@ def transform_tekton_content(
     return content
 
 
+def retarget_bundle_namespace(
+    content: str, dev_registry: str, release_registry: str
+) -> str:
+    """Point the bundle Containerfile-downstream component images at the release
+    registry namespace instead of the dev-preview one.
+
+    A branch cut from main inherits main's dev-preview component refs (e.g.
+    registry.redhat.io/mtv-candidate/...), whose images are ephemeral and get
+    GC'd. Flipping the namespace (mtv-candidate -> migration-toolkit-virtualization)
+    makes it resolve to the durable release images; bundle_sync then refreshes
+    the SHAs. Slash-bounded so only the namespace segment is replaced.
+    """
+    return content.replace(f"/{dev_registry}/", f"/{release_registry}/")
+
+
 async def branch_one(
     origin: str, repo_url: str, args: Namespace
 ) -> BranchingResultDTO:
@@ -221,6 +236,23 @@ async def branch_one(
             with open(images_path, "w") as f:
                 f.write(images.replace(marker, version_name))
             paths.append(images_conf_path)
+
+        # Flip the bundle Containerfile-downstream component images from the
+        # dev-preview namespace to the release registry, so the release branch
+        # doesn't inherit main's (ephemeral) dev-preview refs. bundle_sync then
+        # refreshes the SHAs to the release snapshot.
+        cf_rel = config.get_bundle_sync()["containerfile_path"]
+        cf_path = os.path.join(root, cf_rel)
+        if os.path.exists(cf_path):
+            with open(cf_path) as f:
+                cf = f.read()
+            with open(cf_path, "w") as f:
+                f.write(
+                    retarget_bundle_namespace(
+                        cf, config.get_dev_preview_namespace(), registry
+                    )
+                )
+            paths.append(cf_rel)
 
     if dry_run:
         logger.info(
