@@ -2,6 +2,7 @@ import pytest
 from tasks.branching import (
     mtv_version_parts,
     render_release_conf,
+    retarget_bundle_namespace,
     transform_tekton_content,
 )
 from tasks.konflux_stream import (
@@ -77,6 +78,31 @@ class TestRenderReleaseConf:
                 registry="r",
                 ocp_versions="",
             )
+
+
+class TestRetargetBundleNamespace:
+    def test_flips_dev_preview_namespace_to_release(self):
+        src = (
+            'ARG OPERATOR_IMAGE="registry.redhat.io/mtv-candidate/'
+            'mtv-rhel9-operator@sha256:c401"\n'
+            'ARG API_IMAGE="registry.redhat.io/mtv-candidate/mtv-api-rhel9@sha256:aa"\n'
+        )
+        out = retarget_bundle_namespace(
+            src, "mtv-candidate", "migration-toolkit-virtualization"
+        )
+        assert "mtv-candidate" not in out
+        assert out.count("/migration-toolkit-virtualization/") == 2
+        # SHAs are untouched (bundle_sync refreshes those)
+        assert "@sha256:c401" in out
+
+    def test_noop_when_already_release(self):
+        src = 'ARG X="registry.redhat.io/migration-toolkit-virtualization/mtv-x@sha256:1"\n'
+        assert (
+            retarget_bundle_namespace(
+                src, "mtv-candidate", "migration-toolkit-virtualization"
+            )
+            == src
+        )
 
 
 class TestTransformTektonContent:

@@ -13,7 +13,8 @@ DESCRIPTION = (
     "For each selected origin: create the release-X.Y branch from main and push\n"
     "it, then open a 'CF-<version>' PR into it that regenerates build/release.conf,\n"
     "renames/retargets the .tekton pipelines from dev-preview to the release\n"
-    "stream (and, for forklift, bumps images.conf). The Konflux releng side is\n"
+    "stream (and, for forklift, bumps images.conf and retargets the bundle\n"
+    "Containerfile-downstream to the release registry). The Konflux releng side is\n"
     "handled by the separate 'konflux_stream' pipeline. Dry-run by default; pass\n"
     "--apply to push and open PRs."
 )
