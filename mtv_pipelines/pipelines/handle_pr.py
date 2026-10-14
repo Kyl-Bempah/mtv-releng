@@ -27,10 +27,11 @@ from tasks.get_mtv_versions import get_mtv_versions
 from tasks.prepare_slack_build import prepare_slack_build
 from tasks.trigger_upgrade_jobs import trigger_upgrade_jobs
 from tasks.wait_for_pr import wait_for_pr
-from utils import iib_short_for_target_ocp, parse_version
+from utils import collect_jira_keys, iib_short_for_target_ocp, parse_version
 from wrappers.gh_cli import GHCLI
 from wrappers.jenkins import JenkinsManager
 from wrappers.jenkins_analyzer import JenkinsAnalyzer
+from wrappers.jira_fixed_in_build import JiraFixedInBuild
 from wrappers.skopeo import ImageNotFoundError
 from wrappers.slack import Slack
 
@@ -68,6 +69,14 @@ def arg_parse(arg_parser):
         "-s",
         "--skip-slack",
         help="Tells the pipeline to skip sending the slack message",
+        required=False,
+        action="store_true",
+    )
+
+    arg_parser.add_argument(
+        "--skip-fixed-in-build",
+        dest="skip_fixed_in_build",
+        help="Tells the pipeline to skip the Jira fixed-in-build notification",
         required=False,
         action="store_true",
     )
@@ -414,6 +423,51 @@ async def extract_commit_diff(
             results.append(RepoDiffDTO(repo=repo, diff=diff, version=version))
             break
     return results
+
+
+@task
+@depends_on(extract_commit_diff, process_pull_request)
+async def notify_jira_fixed_in_build(
+    data: CollectorDTO, args: Namespace, tg: TaskGroup
+) -> EmptyDTO:
+    if args.skip_fixed_in_build:
+        logger.info(
+            "Skipping Jira fixed-in-build as --skip-fixed-in-build arg was provided"
+        )
+        return EmptyDTO()
+
+    if not data:
+        logger.warning(f"Previous task didn't return any data")
+        return EmptyDTO()
+
+    diffs = data.task_outputs.get(extract_commit_diff.name)
+    fbc_repo = data.task_outputs.get(process_pull_request.name)
+    if not diffs:
+        logger.warning(f"Previous task didn't return any commit diff")
+        return EmptyDTO()
+    if not fbc_repo:
+        logger.warning(f"Previous task didn't return any FBC repo")
+        return EmptyDTO()
+
+    # Only this build's own X.Y stream's keys (mirrors automatic_iib).
+    version_xy = ".".join(str(fbc_repo.for_bundle.version).split(".")[:2])
+    keys = collect_jira_keys(
+        [d for d in diffs if ".".join(d.version.split(".")[:2]) == version_xy]
+    )
+    if not keys:
+        logger.info("No Jira issues to notify")
+        return EmptyDTO()
+
+    try:
+        jira = JiraFixedInBuild()
+    except (RuntimeError, ValueError) as error:
+        logger.error(
+            f"Cannot initialize Jira fixed-in-build notification: {error}"
+        )
+        return EmptyDTO()
+
+    jira.notify_build(keys, str(fbc_repo.current_iib_version))
+    return EmptyDTO()
 
 
 @task
