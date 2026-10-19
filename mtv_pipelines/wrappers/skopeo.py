@@ -55,7 +55,14 @@ class Skopeo:
             return url
         return PROTOCOL + url
 
-    def inspect(self, img_url: str) -> dict:
+    def __override_arch__(self, arch: str | None) -> None:
+        # Pin the platform so multi-arch images resolve the same way on every
+        # host (e.g. an arm64 laptop vs. the amd64 releng host).
+        if arch:
+            self.cmd.extend(["--override-os", "linux", "--override-arch", arch])
+
+    def inspect(self, img_url: str, arch: str | None = None) -> dict:
+        self.__override_arch__(arch)
         self.cmd.extend(
             [
                 "inspect",
@@ -66,7 +73,10 @@ class Skopeo:
 
         return json.loads(self.__exec__())
 
-    def copy(self, img_url: str, target_path: str) -> None:
+    def copy(
+        self, img_url: str, target_path: str, arch: str | None = None
+    ) -> None:
+        self.__override_arch__(arch)
         self.cmd.extend(
             [
                 "copy",
