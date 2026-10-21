@@ -649,7 +649,8 @@ def test_act_and_report_apply_comments_and_labels(triage_config):
     )
 
 
-def test_act_and_report_apply_skips_already_commented(triage_config):
+def test_act_and_report_apply_labels_but_does_not_recomment(triage_config):
+    # A previous run commented but failed to label: label now, no 2nd comment.
     jira = MagicMock()
     jira.get_comments.return_value = ["old _[cve-triage:FIXED_IN_BUILD]_"]
     with patch("pipelines.cve_triage.Jira", return_value=jira):
@@ -660,3 +661,104 @@ def test_act_and_report_apply_skips_already_commented(triage_config):
         )
     assert result.applied == 0
     jira.add_comment.assert_not_called()
+    jira.add_labels.assert_called_once_with(
+        "MTV-1", ["triage:ready-for-assigned"]
+    )
+
+
+# --- failure handling (PR #61 review) -----------------------------------------
+
+API_BUNDLE = {
+    "API_IMAGE": "registry.redhat.io/migration-toolkit-virtualization/"
+    "mtv-api-rhel9@sha256:abc"
+}
+OCP_CONTAINERFILE = "FROM registry.redhat.io/openshift4/ose-cli-rhel9:v4.20\n"
+
+
+def test_fetch_raw_returns_none_on_network_error():
+    import requests
+
+    with patch(
+        "pipelines.cve_triage.requests.get",
+        side_effect=requests.ConnectionError("down"),
+    ):
+        assert pipeline._fetch_raw("kubev2v/forklift", "main", "x") is None
+
+
+def test_scan_errors_when_containerfile_missing():
+    with (
+        patch("pipelines.cve_triage._fetch_raw", return_value=None),
+        patch("pipelines.cve_triage.Skopeo") as m_skopeo,
+    ):
+        result = pipeline._scan_component(
+            "release-2.10", "mtv-api-rhel9", API_BUNDLE, set()
+        )
+    assert "Could not fetch" in result["error"]
+    m_skopeo.return_value.copy.assert_not_called()
+
+
+def test_scan_errors_when_base_inspect_fails():
+    # Without base layers everything would look MTV-built -> wrong AFFECTED.
+    skopeo = MagicMock()
+    skopeo.inspect.side_effect = RuntimeError("unauthorized")
+    with (
+        patch(
+            "pipelines.cve_triage._fetch_raw", return_value=OCP_CONTAINERFILE
+        ),
+        patch("pipelines.cve_triage.Skopeo", return_value=skopeo),
+    ):
+        result = pipeline._scan_component(
+            "release-2.10", "mtv-api-rhel9", API_BUNDLE, set()
+        )
+    assert "Could not inspect base image" in result["error"]
+    skopeo.copy.assert_not_called()
+    category, _ = ct.classify(
+        Facts(ticket=_ticket(), error=result["error"]), JIRA
+    )
+    assert category == ct.NEEDS_REVIEW
+
+
+def test_scan_converts_archive_errors_into_error_result():
+    skopeo = MagicMock()
+    skopeo.inspect.return_value = {
+        "Layers": ["sha256:base"],
+        "Labels": {"version": "v4.20.0"},
+    }
+    with (
+        patch(
+            "pipelines.cve_triage._fetch_raw", return_value=OCP_CONTAINERFILE
+        ),
+        patch("pipelines.cve_triage.Skopeo", return_value=skopeo),
+        patch(
+            "pipelines.cve_triage.scan_image_dir",
+            side_effect=tarfile.ReadError("bad blob"),
+        ),
+    ):
+        result = pipeline._scan_component(
+            "release-2.10", "mtv-api-rhel9", API_BUNDLE, set()
+        )
+    assert "bad blob" in result["error"]
+
+
+def test_lookup_ocp_failure_returns_none_and_is_cached():
+    import requests
+
+    jira = MagicMock()
+    jira.search.side_effect = requests.ConnectionError("down")
+    cache = {}
+    assert pipeline._lookup_ocp(jira, cache, "CVE-1", OCP_CLI) is None
+    assert pipeline._lookup_ocp(jira, cache, "CVE-1", OCP_CLI) is None
+    jira.search.assert_called_once()
+
+
+def test_skopeo_auth_prod_skips_stage_login():
+    from wrappers.skopeo import Skopeo
+
+    with patch("wrappers.skopeo.subprocess.run") as m_run:
+        m_run.return_value = MagicMock(returncode=0, stdout=b"")
+        Skopeo().auth_prod()
+    commands = [c.args[0][-1] for c in m_run.call_args_list]
+    assert commands == [
+        "skopeo login registry.redhat.io "
+        "-u $REGISTRY_PROD_USER -p $REGISTRY_PROD_TOKEN"
+    ]

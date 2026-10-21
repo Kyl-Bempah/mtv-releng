@@ -3,6 +3,7 @@ import datetime
 import json
 import logging
 import os
+import tarfile
 from argparse import ArgumentParser, Namespace
 from asyncio import TaskGroup, to_thread
 
@@ -26,6 +27,7 @@ from tasks.cve_triage import (
     NEEDS_REVIEW,
     BaseImage,
     Facts,
+    OcpTracker,
     base_component,
     bundle_images,
     candidates_from_title,
@@ -115,7 +117,11 @@ def _split(value: str) -> list[str]:
 
 def _fetch_raw(repo: str, branch: str, path: str) -> str | None:
     url = f"{config.get_cve_triage()['raw_base_url']}/{repo}/{branch}/{path}"
-    resp = requests.get(url, timeout=config.get_timeouts()["http_seconds"])
+    try:
+        resp = requests.get(url, timeout=config.get_timeouts()["http_seconds"])
+    except requests.RequestException as e:
+        logger.warning(f"{url} failed: {e}")
+        return None
     if resp.status_code != 200:
         logger.warning(f"{url} returned {resp.status_code}")
         return None
@@ -178,25 +184,56 @@ def _vuln_info(ticket: CveTicketDTO, aliases: dict) -> tuple:
     return candidates, ranges, needles
 
 
-def _inspect_base(containerfile: str) -> BaseImage | None:
+def _inspect_base(containerfile: str) -> BaseImage:
+    """Final-stage base image; raises if its layers can't be read.
+
+    Without the base layer digests every file would look MTV-built, so a
+    failure here must stop the scan rather than misattribute packages.
+    """
     ref = final_from(containerfile)
     if not ref:
-        return None
-    base = BaseImage(ref=ref, component=base_component(ref))
+        raise RuntimeError("Containerfile has no FROM line")
     try:
         info = Skopeo().inspect(ref, arch=config.get_cve_triage()["arch"])
     except RuntimeError as e:
-        logger.warning(f"Could not inspect base image {ref}: {e}")
-        return base
-    base.stream = stream_from_version(info.get("Labels", {}).get("version"))
-    base.layer_digests = set(info.get("Layers", []))
-    return base
+        raise RuntimeError(f"Could not inspect base image {ref}: {e}") from e
+    layers = set(info.get("Layers", []))
+    if not layers:
+        raise RuntimeError(f"Base image {ref} reported no layers")
+    return BaseImage(
+        ref=ref,
+        component=base_component(ref),
+        stream=stream_from_version(info.get("Labels", {}).get("version")),
+        layer_digests=layers,
+    )
 
 
 def _scan_component(
     branch: str, component: str, bundle: dict, needles: set[str]
 ) -> dict:
-    """Image facts shared by every ticket on one branch + component."""
+    """Image facts shared by every ticket on one branch + component.
+
+    Runs in a TaskGroup thread, where an uncaught exception would cancel
+    every other scan and lose the whole run; failures become an error that
+    classifies the tickets as NEEDS_REVIEW instead.
+    """
+    try:
+        return _scan_component_unguarded(branch, component, bundle, needles)
+    except (
+        RuntimeError,
+        OSError,
+        KeyError,
+        ValueError,
+        tarfile.TarError,
+        requests.RequestException,
+    ) as e:
+        logger.warning(f"Scan of {component} on {branch} failed: {e}")
+        return {"error": f"Could not scan {component} on {branch}: {e}"}
+
+
+def _scan_component_unguarded(
+    branch: str, component: str, bundle: dict, needles: set[str]
+) -> dict:
     ct = config.get_cve_triage()
     cmp = config.get_cmp_mappings().get(component)
     if not cmp or not cmp.get("arg"):
@@ -234,20 +271,21 @@ def _scan_component(
         component, f"build/{cmp['upstream']}/Containerfile-downstream"
     )
     containerfile = _fetch_raw(repo, branch, path)
-    base = _inspect_base(containerfile) if containerfile else None
+    if containerfile is None:
+        return {
+            **result,
+            "error": f"Could not fetch {repo}@{branch}:{path}, so inherited "
+            "packages can't be told apart from MTV-built ones",
+        }
+    base = _inspect_base(containerfile)
     result["base"] = base
 
     tmp = create_temp_dir(f"cve-triage-{component}")
     try:
         Skopeo().copy(image, tmp.name, arch=ct["arch"])
         result["go"], result["python"] = scan_image_dir(
-            tmp.name,
-            ct["scan_prefixes"],
-            base.layer_digests if base else set(),
-            needles,
+            tmp.name, ct["scan_prefixes"], base.layer_digests, needles
         )
-    except RuntimeError as e:
-        result["error"] = f"Could not pull/scan {image}: {e}"
     finally:
         tmp.cleanup()
     return result
@@ -265,8 +303,10 @@ async def analyze(
     ct = config.get_cve_triage()
     jira_url = config.get_jira_url()
     try:
-        Skopeo().auth()
+        Skopeo().auth_prod()
     except RuntimeError as e:
+        # Not fatal here: base inspections that then fail are reported as
+        # NEEDS_REVIEW per component.
         logger.warning(f"registry.redhat.io login failed: {e}")
 
     # OSV lookups are per CVE; image scans are per branch + component.
@@ -342,17 +382,7 @@ async def analyze(
                     and base.component.startswith("openshift4/")
                     and any(p.from_base for p in facts.found)
                 ):
-                    cache_key = (t.cve, base.component)
-                    if cache_key not in ocp_cache:
-                        ocp_cache[cache_key] = jira.search(
-                            "project = OCPBUGS AND labels = SecurityTracking "
-                            f'AND labels = "{t.cve}" '
-                            f'AND labels = "pscomponent:{base.component}"',
-                            OCP_FIELDS,
-                        )
-                    facts.ocp = pick_ocp_tracker(
-                        ocp_cache[cache_key], base.stream
-                    )
+                    facts.ocp = _lookup_ocp(jira, ocp_cache, t.cve, base)
 
         category, evidence = classify(facts, jira_url)
         logger.info(f"{t.key}: {category}")
@@ -367,15 +397,44 @@ async def analyze(
     return CveFindingsDTO(findings=findings)
 
 
+def _lookup_ocp(
+    jira: Jira, cache: dict, cve: str, base: BaseImage
+) -> OcpTracker | None:
+    """OpenShift's tracker for *cve* on *base*'s stream; None if unavailable.
+
+    A failed lookup leaves the ticket at NEEDS_REVIEW instead of aborting the
+    run, and is cached so the same CVE isn't retried for every ticket.
+    """
+    key = (cve, base.component)
+    if key not in cache:
+        try:
+            cache[key] = jira.search(
+                "project = OCPBUGS AND labels = SecurityTracking "
+                f'AND labels = "{cve}" '
+                f'AND labels = "pscomponent:{base.component}"',
+                OCP_FIELDS,
+            )
+        except (JiraForbiddenError, requests.RequestException) as e:
+            logger.warning(f"OCPBUGS lookup for {cve} failed: {e}")
+            cache[key] = []
+    return pick_ocp_tracker(cache[key], base.stream)
+
+
 def _apply(jira: Jira, finding: CveFindingDTO) -> bool:
+    """Comment (once) and label; True when a new comment was posted.
+
+    The label is added even when the comment already exists, so a run that
+    commented but failed to label is completed by the next one.
+    """
     key = finding.ticket.key
     marker = COMMENT_MARKER.split("{", 1)[0]
-    if any(marker in body for body in jira.get_comments(key)):
-        logger.info(f"{key} already has a cve-triage comment; skipping")
-        return False
-    jira.add_comment(key, finding.comment)
+    commented = any(marker in body for body in jira.get_comments(key))
+    if commented:
+        logger.info(f"{key} already has a cve-triage comment; labelling only")
+    else:
+        jira.add_comment(key, finding.comment)
     jira.add_labels(key, [finding.label])
-    return True
+    return not commented
 
 
 def _send_slack(

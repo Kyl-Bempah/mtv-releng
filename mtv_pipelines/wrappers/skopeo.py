@@ -86,15 +86,19 @@ class Skopeo:
         )
         self.__exec__()
 
-    def auth(self) -> None:
+    def __login__(self, registry: str, user_var: str, token_var: str) -> None:
         self.cmd = ["bash", "-c"]
-        s = "skopeo login registry.stage.redhat.io "
-        s += f"-u ${REGISTRY_STAGE_USER} -p ${REGISTRY_STAGE_TOKEN}"
-        self.cmd.append(s)
+        self.cmd.append(f"skopeo login {registry} -u ${user_var} -p ${token_var}")
         self.__exec__()
 
-        self.cmd = ["bash", "-c"]
-        s = "skopeo login registry.redhat.io "
-        s += f"-u ${REGISTRY_PROD_USER} -p ${REGISTRY_PROD_TOKEN}"
-        self.cmd.append(s)
-        self.__exec__()
+    def auth(self) -> None:
+        self.__login__(
+            "registry.stage.redhat.io", REGISTRY_STAGE_USER, REGISTRY_STAGE_TOKEN
+        )
+        self.auth_prod()
+
+    def auth_prod(self) -> None:
+        """Log in to registry.redhat.io only (no stage credentials needed)."""
+        self.__login__(
+            "registry.redhat.io", REGISTRY_PROD_USER, REGISTRY_PROD_TOKEN
+        )
