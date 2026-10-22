@@ -751,6 +751,67 @@ def test_lookup_ocp_failure_returns_none_and_is_cached():
     jira.search.assert_called_once()
 
 
+def _osv_response(status, payload=None):
+    resp = MagicMock(status_code=status)
+    resp.json.return_value = payload or {}
+    return resp
+
+
+def test_osv_missing_record_returns_none():
+    from wrappers import osv
+
+    with patch("wrappers.osv.requests.get", return_value=_osv_response(404)):
+        assert osv.get_vuln("CVE-2026-1") is None
+
+
+@pytest.mark.parametrize("status", [429, 500, 503])
+def test_osv_http_errors_raise(status):
+    from wrappers import osv
+
+    with patch(
+        "wrappers.osv.requests.get", return_value=_osv_response(status)
+    ):
+        with pytest.raises(osv.OsvLookupError):
+            osv.get_vuln("CVE-2026-1")
+
+
+def test_osv_network_error_raises():
+    import requests
+    from wrappers import osv
+
+    with patch(
+        "wrappers.osv.requests.get", side_effect=requests.Timeout("slow")
+    ):
+        with pytest.raises(osv.OsvLookupError):
+            osv.get_vuln("CVE-2026-1")
+
+
+def test_analyze_osv_outage_is_needs_review_not_fallback():
+    # Without the guard, the title alias + flaw-text range would classify this
+    # ticket from weaker evidence and it would get a permanent label.
+    from wrappers.osv import OsvLookupError
+
+    ticket = _ticket(description="Prior to 0.39.0")
+    with (
+        patch("pipelines.cve_triage.Skopeo"),
+        patch("pipelines.cve_triage.Jira"),
+        patch("pipelines.cve_triage._fetch_raw", return_value=None),
+        patch(
+            "pipelines.cve_triage.osv.get_vuln",
+            side_effect=OsvLookupError("OSV returned 503"),
+        ),
+    ):
+        result = run_task(
+            pipeline.analyze,
+            pipeline.CveTicketsDTO(tickets=[ticket]),
+            _args(),
+        )
+    [finding] = result.findings
+    assert finding.category == ct.NEEDS_REVIEW
+    assert "OSV returned 503" in finding.evidence[0]
+    assert "retry" in finding.evidence[0]
+
+
 def test_skopeo_auth_prod_skips_stage_login():
     from wrappers.skopeo import Skopeo
 

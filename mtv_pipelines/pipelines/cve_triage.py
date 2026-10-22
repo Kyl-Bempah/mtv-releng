@@ -50,6 +50,7 @@ from tasks.cve_triage import (
 )
 from utils import create_temp_dir, replace_for_quay
 from wrappers import osv
+from wrappers.osv import OsvLookupError
 from wrappers.jira import Jira, JiraForbiddenError
 from wrappers.skopeo import Skopeo
 from wrappers.slack import Slack, SlackBuilder
@@ -311,9 +312,17 @@ async def analyze(
 
     # OSV lookups are per CVE; image scans are per branch + component.
     vuln = {}
+    osv_errors: dict[str, str] = {}
     for t in data.tickets:
-        if t.cve and t.cve not in vuln and not t.embargoed:
+        if t.embargoed or not t.cve or t.cve in vuln or t.cve in osv_errors:
+            continue
+        try:
             vuln[t.cve] = _vuln_info(t, ct["package_aliases"])
+        except OsvLookupError as e:
+            # Don't fall back to the flaw text: the ticket would get a
+            # permanent label based on weaker evidence than a retry gives.
+            logger.warning(str(e))
+            osv_errors[t.cve] = str(e)
 
     groups: dict[tuple, set[str]] = {}
     for t in data.tickets:
@@ -353,6 +362,10 @@ async def analyze(
             scan = scans.get((t.branch, t.component))
             if scan is None:
                 facts.error = "Ticket has no [mtv-X.Y] branch or pscomponent."
+            elif t.cve in osv_errors:
+                # NOT_BUILT doesn't depend on OSV, so it still applies.
+                facts.not_built_reason = scan.get("not_built", "")
+                facts.error = f"{osv_errors[t.cve]}; will retry next run."
             elif t.cve not in vuln:
                 facts.error = "Ticket has no CVE-* label."
             else:
