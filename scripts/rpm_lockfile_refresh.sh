@@ -2,7 +2,8 @@
 #
 # Regenerate redhat.repo + rpms.lock.yaml for components whose base image
 # changed (e.g. after a dep_bump PR). Automates the "Instructional Guideline
-# for Running RPM Update Scripts" steps, one podman container per component.
+# for Running RPM Update Scripts" steps, one podman container (and one RHSM
+# registration) per group of components sharing a solver image.
 #
 # Run on an x86_64 VM, from anywhere:
 #
@@ -98,59 +99,105 @@ rhel_version() {
   fi
 }
 
-# Steps shared by every RHEL version, run inside the container.
-read -r -d '' LOCK_STEPS <<'EOF' || true
+# Steps run inside the container. These are quoted heredocs, so every $ and
+# quote below reaches the container shell literally; run_in passes the
+# variables they reference through the environment.
+read -r -d '' REGISTER_STEPS <<'EOF' || true
+registered=0
+for attempt in 1 2 3; do
+  if subscription-manager register --activationkey="${ACTIVATION_KEY}${RHEL_MAJOR}" --org="$RHSM_ORG" >/dev/null; then
+    registered=1
+    break
+  fi
+  sleep 30
+done
+[[ $registered -eq 1 ]]
+# RHSM rate limits rapid registrations; unregister when the container exits
+# so it doesn't leave a stale registration on the org.
+trap 'subscription-manager unregister >/dev/null 2>&1 || true' EXIT
+EOF
+
+read -r -d '' EUS_STEPS <<'EOF' || true
+# EUS repos 404 unless the minor is an EUS release; disable them on every
+# RHEL major (the manual guide does this for RHEL 10) so dnf and the
+# lockfile don't try to fetch them.
+arch=$(uname -m)
+subscription-manager repos \
+  --disable="rhel-${RHEL_MAJOR}-for-$arch-baseos-eus-rpms" \
+  --disable="rhel-${RHEL_MAJOR}-for-$arch-appstream-eus-rpms" \
+  --disable="rhel-${RHEL_MAJOR}-for-$arch-baseos-eus-source-rpms" \
+  --disable="rhel-${RHEL_MAJOR}-for-$arch-appstream-eus-source-rpms" >/dev/null || true
+yum clean all -q
+EOF
+
+read -r -d '' DEPS_STEPS <<'EOF' || true
 dnf install -y -q pip skopeo >/dev/null
 printf '%s' "$REGISTRY_AUTH_PASS" \
   | skopeo login -u "$REGISTRY_AUTH_USER" --password-stdin registry.redhat.io >/dev/null
 python3 -m pip install -q --user "$RLP_URL"
 export PATH="$HOME/.local/bin:$PATH"
-cd "/source/$COMPONENT"
-rpm-lockfile-prototype rpms.in.yaml
+EOF
+
+read -r -d '' COPY_STEPS <<'EOF' || true
+for COMPONENT in $GROUP_COMPONENTS; do
+  cp /etc/yum.repos.d/redhat.repo "/source/$COMPONENT/redhat.repo"
+  sed -i "s/$(uname -m)/\$basearch/g" "/source/$COMPONENT/redhat.repo"
+done
+EOF
+
+read -r -d '' SOLVE_STEPS <<'EOF' || true
+failed=""
+for COMPONENT in $GROUP_COMPONENTS; do
+  echo "== solving $COMPONENT"
+  if (cd "/source/$COMPONENT" && rpm-lockfile-prototype rpms.in.yaml); then
+    :
+  else
+    failed="$failed $COMPONENT"
+  fi
+done
+echo "RLP-FAILED:${failed}"
 EOF
 
 run_in() {  # run_in <image> <script>
   podman run --rm --platform linux/amd64 --tmpfs /run/secrets \
     -v "$CHECKOUT:/source:Z" \
     -e COMPONENT -e RHEL_MAJOR -e RHEL_MINOR -e ACTIVATION_KEY -e RHSM_ORG \
-    -e RLP_URL -e REGISTRY_AUTH_USER -e REGISTRY_AUTH_PASS -e OLD_ENTITLEMENT \
+    -e GROUP_COMPONENTS -e RLP_URL -e REGISTRY_AUTH_USER -e REGISTRY_AUTH_PASS -e OLD_ENTITLEMENT \
     "$1" bash -euo pipefail -c "$2"
 }
 
-refresh_standard() {
-  local image="registry.access.redhat.com/ubi${RHEL_MAJOR}:${RHEL_MINOR:-latest}"
-  echo "  container: $image"
-  run_in "$image" "
-registered=0
-for attempt in 1 2 3; do
-  if subscription-manager register --activationkey=\"\${ACTIVATION_KEY}\${RHEL_MAJOR}\" --org=\"\$RHSM_ORG\" >/dev/null; then
-    registered=1
-    break
+# One container per solver image: components whose bases run the same RHEL
+# version share a registration, a dependency install and a repo file.
+refresh_group() {  # refresh_group <image> <component>...
+  local image=$1 log failed_list c
+  shift
+  local components="$*"
+  echo "  container: $image ($# components)"
+  export GROUP_COMPONENTS="$components"
+  if log=$(run_in "$image" "$REGISTER_STEPS
+$EUS_STEPS
+$DEPS_STEPS
+$COPY_STEPS
+$SOLVE_STEPS" 2>&1 | tee /dev/stderr); then
+    failed_list="$(sed -n 's/^RLP-FAILED://p' <<<"$log" | tail -1)"
+  else
+    failed_list="$components"  # registration or setup failed for the group
   fi
-  sleep 30
-done
-[[ \$registered -eq 1 ]]
-# RHSM rate limits rapid registrations; unregister when the container exits
-# so it doesn't leave a stale registration on the org.
-trap 'subscription-manager unregister >/dev/null 2>&1 || true' EXIT
-# EUS repos 404 unless the minor is an EUS release; disable them on every
-# RHEL major (the manual guide does this for RHEL 10) so dnf and the
-# lockfile don't try to fetch them.
-arch=\$(uname -m)
-subscription-manager repos \\
-  --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-baseos-eus-rpms\" \\
-  --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-appstream-eus-rpms\" \\
-  --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-baseos-eus-source-rpms\" \\
-  --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-appstream-eus-source-rpms\" >/dev/null || true
-yum clean all -q
-cp /etc/yum.repos.d/redhat.repo \"/source/\$COMPONENT/redhat.repo\"
-sed -i \"s/\$(uname -m)/\\\$basearch/g\" \"/source/\$COMPONENT/redhat.repo\"
-$LOCK_STEPS"
+  for c in $components; do
+    if [[ " $failed_list " == *" $c "* ]]; then
+      failed+=("$c")
+    else
+      ok+=("$c")
+    fi
+  done
 }
 
 # winlegacyiso: RHEL 7 repo file, locked from a RHEL 9 container whose
 # entitlement certs replace the RHEL 7 container's in redhat.repo.
 refresh_rhel7() {
+  # Stage 2 solves a single component, but it reuses SOLVE_STEPS, which
+  # iterates GROUP_COMPONENTS.
+  export GROUP_COMPONENTS="$COMPONENT"
   echo "  stage 1: registry.access.redhat.com/ubi7 (repo file)"
   OLD_ENTITLEMENT=$(run_in registry.access.redhat.com/ubi7:latest "
 # ubi7's subscription-manager refuses to run while /etc/rhsm-host (a
@@ -193,55 +240,68 @@ subscription-manager repos \\
   --disable=\"rhel-9-for-\$arch-appstream-eus-source-rpms\" >/dev/null || true
 new=\$(ls /etc/pki/entitlement/ | grep -v -- '-key.pem' | head -1 | sed 's/\\.pem\$//')
 sed -i \"s/\$OLD_ENTITLEMENT/\$new/g\" \"/source/\$COMPONENT/redhat.repo\"
-$LOCK_STEPS"
+$DEPS_STEPS
+$SOLVE_STEPS"
 }
 
 export RLP_URL ACTIVATION_KEY RHSM_ORG
 ok=() failed=()
 
-refresh_one() {
-  local COMPONENT="${1%/}"
-  # Accept a bare component name; the ".konflux/" prefix is optional
-  [[ -f "$CHECKOUT/$COMPONENT/rpms.in.yaml" ]] || COMPONENT=".konflux/$COMPONENT"
-  export COMPONENT
-  spec="$CHECKOUT/$COMPONENT/rpms.in.yaml"
-  echo "== $COMPONENT"
-  if [[ ! -f "$spec" ]]; then
-    echo "  no rpms.in.yaml"; failed+=("$COMPONENT"); return
-  fi
-  # Only the stageName selector is supported; rather than silently locking
-  # against the wrong stage, fail loudly on the others.
-  if grep -qE '^[[:space:]]*(stageNum|imagePattern):' "$spec"; then
-    echo "  unsupported stage selector in rpms.in.yaml (stageNum/imagePattern)"
-    failed+=("$COMPONENT"); return
-  fi
-  file=$(yaml_value "$spec" file)
-  stage=$(yaml_value "$spec" stageName)
-  containerfile=$(realpath -m "$CHECKOUT/$COMPONENT/$file")
-  if ! image=$(stage_image "$containerfile" "$stage"); then
-    echo "  no FROM for stage '${stage:-<last>}' in $file"; failed+=("$COMPONENT"); return
-  fi
-  if grep -qE '\.el7([^0-9]|$)' "$spec"; then
-    RHEL_MAJOR=7 RHEL_MINOR=""
+# Resolve every component to its solver image, then refresh each group in
+# one container. RHEL 7 components (el7 package sets) keep their own
+# two-stage flow.
+refresh_batch() {  # refresh_batch <component>...
+  local -A groups=()
+  local COMPONENT spec file stage containerfile image version major minor
+  for COMPONENT in "$@"; do
+    COMPONENT="${COMPONENT%/}"
+    # Accept a bare component name; the ".konflux/" prefix is optional
+    [[ -f "$CHECKOUT/$COMPONENT/rpms.in.yaml" ]] || COMPONENT=".konflux/$COMPONENT"
+    export COMPONENT
+    spec="$CHECKOUT/$COMPONENT/rpms.in.yaml"
+    echo "== $COMPONENT"
+    if [[ ! -f "$spec" ]]; then
+      echo "  no rpms.in.yaml"; failed+=("$COMPONENT"); continue
+    fi
+    # Only the stageName selector is supported; rather than silently locking
+    # against the wrong stage, fail loudly on the others.
+    if grep -qE '^[[:space:]]*(stageNum|imagePattern):' "$spec"; then
+      echo "  unsupported stage selector in rpms.in.yaml (stageNum/imagePattern)"
+      failed+=("$COMPONENT"); continue
+    fi
+    file=$(yaml_value "$spec" file)
+    stage=$(yaml_value "$spec" stageName)
+    containerfile=$(realpath -m "$CHECKOUT/$COMPONENT/$file")
+    if ! image=$(stage_image "$containerfile" "$stage"); then
+      echo "  no FROM for stage '${stage:-<last>}' in $file"; failed+=("$COMPONENT"); continue
+    fi
+    if grep -qE '\.el7([^0-9]|$)' "$spec"; then
+      RHEL_MAJOR=7 RHEL_MINOR=""
+      export RHEL_MAJOR RHEL_MINOR
+      echo "  base: $image (RHEL 7 packages)"
+      if refresh_rhel7; then ok+=("$COMPONENT"); else failed+=("$COMPONENT"); fi
+      continue
+    fi
+    if ! version=$(rhel_version "$image"); then
+      echo "  can't tell the RHEL version of $image"; failed+=("$COMPONENT"); continue
+    fi
+    major="${version%%.*}"
+    minor=""
+    [[ "$version" == *.* ]] && minor="$version"
+    echo "  base: $image (RHEL $version)"
+    groups["registry.access.redhat.com/ubi${major}:${minor:-latest}"]+="$COMPONENT "
+  done
+
+  for image in $(printf '%s\n' "${!groups[@]}" | sort); do
+    RHEL_MAJOR="${image##*ubi}"; RHEL_MAJOR="${RHEL_MAJOR%%:*}"
+    RHEL_MINOR="${image##*:}"
+    [[ "$RHEL_MINOR" == latest ]] && RHEL_MINOR=""
     export RHEL_MAJOR RHEL_MINOR
-    echo "  base: $image (RHEL 7 packages)"
-    if refresh_rhel7; then ok+=("$COMPONENT"); else failed+=("$COMPONENT"); fi
-    return
-  fi
-  if ! version=$(rhel_version "$image"); then
-    echo "  can't tell the RHEL version of $image"; failed+=("$COMPONENT"); return
-  fi
-  RHEL_MAJOR="${version%%.*}"
-  RHEL_MINOR=""
-  [[ "$version" == *.* ]] && RHEL_MINOR="$version"
-  export RHEL_MAJOR RHEL_MINOR
-  echo "  base: $image (RHEL $version)"
-  if refresh_standard; then ok+=("$COMPONENT"); else failed+=("$COMPONENT"); fi
+    refresh_group "$image" ${groups[$image]}
+  done
 }
 
-for COMPONENT in "${COMPONENTS[@]}"; do
-  refresh_one "$COMPONENT"
-done
+refresh_batch "${COMPONENTS[@]}"
 
 # A large batch can trip RHSM's registration rate limit near the end; give
 # failed components one more attempt after a cooldown.
@@ -251,9 +311,7 @@ if (( ${#failed[@]} )) && [[ -z "${NO_RETRY:-}" ]]; then
   sleep 60
   retry=("${failed[@]}")
   failed=()
-  for COMPONENT in "${retry[@]}"; do
-    refresh_one "$COMPONENT"
-  done
+  refresh_batch "${retry[@]}"
 fi
 
 echo

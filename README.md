@@ -213,7 +213,7 @@ REGISTRY_AUTH_USER='11009103|migration-toolkit-virtualization' REGISTRY_AUTH_PAS
   scripts/rpm_lockfile_refresh.sh /path/to/forklift .konflux/forklift-api .konflux/virt-v2v/appliance
 ```
 
-For each component it reads the `rpms.in.yaml` stage's base image, takes the RHEL version from its `cpe` label, and runs the RPM update guide in a matching `ubiN` container: register with the `mtv-konflux-rhelN` activation key, disable EUS repos on RHEL 10, regenerate `redhat.repo`, then run `rpm-lockfile-prototype`. `winlegacyiso` (RHEL 7 packages) uses the guide's two-stage ubi7 → ubi9 flow. The script never commits; review `git status` and push to the PR branch.
+For each component it reads the `rpms.in.yaml` stage's base image and takes the RHEL version from its `cpe` label. Components sharing a solver image (same RHEL major and minor) are then refreshed together in one `ubiN` container — one RHSM registration and one dependency install per group — following the RPM update guide: register with the `mtv-konflux-rhelN` activation key, disable EUS repos, regenerate `redhat.repo`, then run `rpm-lockfile-prototype`. Registrations are retried and unregistered on exit, and failed components get one retry after a cooldown, since RHSM rate-limits rapid registrations. `winlegacyiso` (RHEL 7 packages) uses the guide's two-stage ubi7 → ubi9 flow. The script never commits; review `git status` and push to the PR branch.
 
 **Key flags:** `--branch` (required), `--repo`, `--skip-images`, `--skip-go`, `--apply`, `--update-existing`, `--report-dir`
 
