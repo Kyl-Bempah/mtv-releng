@@ -47,6 +47,24 @@ def test_search_follows_next_page_token(jira):
     assert second.kwargs["json"]["nextPageToken"] == "p2"
 
 
+def test_search_keeps_paging_when_is_last_missing(jira):
+    # A short page with a token but no isLast must not end the search early.
+    jira.session.request.side_effect = [
+        _resp(payload={"issues": [{"key": "A"}], "nextPageToken": "p2"}),
+        _resp(payload={"issues": [{"key": "B"}]}),
+    ]
+    issues = jira.search("project = OCPBUGS", ["summary"])
+    assert [i["key"] for i in issues] == ["A", "B"]
+
+
+def test_search_stops_when_is_last_true(jira):
+    jira.session.request.return_value = _resp(
+        payload={"issues": [{"key": "A"}], "nextPageToken": "x", "isLast": True}
+    )
+    assert len(jira.search("project = OCPBUGS", ["summary"])) == 1
+    jira.session.request.assert_called_once()
+
+
 def test_forbidden_raises_distinct_error(jira):
     jira.session.request.return_value = _resp(status=403)
     with pytest.raises(JiraForbiddenError):

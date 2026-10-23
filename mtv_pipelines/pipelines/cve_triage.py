@@ -42,6 +42,7 @@ from tasks.cve_triage import (
     parse_ticket,
     parse_yarn_lock,
     pick_ocp_tracker,
+    tracker_streams,
     ranges_from_text,
     render_comment,
     render_report,
@@ -354,7 +355,7 @@ async def analyze(
             scans[key] = await value
 
     jira = Jira()
-    ocp_cache: dict[tuple, list[dict]] = {}
+    ocp_cache: dict[tuple, list[dict] | None] = {}
     findings = []
     for t in data.tickets:
         facts = Facts(ticket=t)
@@ -395,7 +396,9 @@ async def analyze(
                     and base.component.startswith("openshift4/")
                     and any(p.from_base for p in facts.found)
                 ):
-                    facts.ocp = _lookup_ocp(jira, ocp_cache, t.cve, base)
+                    facts.ocp, facts.ocp_streams = _lookup_ocp(
+                        jira, ocp_cache, t.cve, base
+                    )
 
         category, evidence = classify(facts, jira_url)
         logger.info(f"{t.key}: {category}")
@@ -412,11 +415,12 @@ async def analyze(
 
 def _lookup_ocp(
     jira: Jira, cache: dict, cve: str, base: BaseImage
-) -> OcpTracker | None:
-    """OpenShift's tracker for *cve* on *base*'s stream; None if unavailable.
+) -> tuple[OcpTracker | None, list[str] | None]:
+    """(tracker for *base*'s stream, streams the search returned).
 
-    A failed lookup leaves the ticket at NEEDS_REVIEW instead of aborting the
-    run, and is cached so the same CVE isn't retried for every ticket.
+    The streams are None when the lookup failed. A failure leaves the ticket
+    at NEEDS_REVIEW instead of aborting the run, and is cached so the same
+    CVE isn't retried for every ticket.
     """
     key = (cve, base.component)
     if key not in cache:
@@ -429,8 +433,11 @@ def _lookup_ocp(
             )
         except (JiraForbiddenError, requests.RequestException) as e:
             logger.warning(f"OCPBUGS lookup for {cve} failed: {e}")
-            cache[key] = []
-    return pick_ocp_tracker(cache[key], base.stream)
+            cache[key] = None
+    issues = cache[key]
+    if issues is None:
+        return None, None
+    return pick_ocp_tracker(issues, base.stream), tracker_streams(issues)
 
 
 def _apply(jira: Jira, finding: CveFindingDTO) -> bool:

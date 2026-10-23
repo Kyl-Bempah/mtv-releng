@@ -54,7 +54,9 @@ class Jira:
             ).json()
             issues.extend(data.get("issues", []))
             token = data.get("nextPageToken")
-            if not token or data.get("isLast", True):
+            # Keep paging while Jira hands out a token; a missing isLast must
+            # not end the search early (pages can be shorter than maxResults).
+            if not token or data.get("isLast") is True:
                 return issues
 
     def get_comments(self, key: str) -> list[str]:

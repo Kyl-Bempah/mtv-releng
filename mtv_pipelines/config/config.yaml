@@ -305,6 +305,8 @@ cve_triage:
     "pyasn1": ["pyasn1"]
     "urllib3": ["urllib3"]
     "ansible-core": ["ansible-core"]
+    "ansible-galaxy": ["ansible-core"]
+    "pip wheel": ["pip"]
     "react router": ["react-router", "react-router-dom"]
   # CVE -> package paths whose absence from the binary means "not reachable",
   # for CVEs where OSV doesn't list the vulnerable import paths

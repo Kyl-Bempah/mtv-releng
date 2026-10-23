@@ -746,9 +746,72 @@ def test_lookup_ocp_failure_returns_none_and_is_cached():
     jira = MagicMock()
     jira.search.side_effect = requests.ConnectionError("down")
     cache = {}
-    assert pipeline._lookup_ocp(jira, cache, "CVE-1", OCP_CLI) is None
-    assert pipeline._lookup_ocp(jira, cache, "CVE-1", OCP_CLI) is None
+    assert pipeline._lookup_ocp(jira, cache, "CVE-1", OCP_CLI) == (None, None)
+    assert pipeline._lookup_ocp(jira, cache, "CVE-1", OCP_CLI) == (None, None)
     jira.search.assert_called_once()
+
+
+def _ocp_issue(key, stream):
+    return {
+        "key": key,
+        "fields": {
+            "summary": f"CVE-1 openshift4/ose-cli-rhel9: x [openshift-{stream}]",
+            "status": {"name": "New"},
+        },
+    }
+
+
+def test_lookup_ocp_returns_tracker_and_streams():
+    jira = MagicMock()
+    jira.search.return_value = [
+        _ocp_issue("OCPBUGS-3", "4.21"),
+        _ocp_issue("OCPBUGS-1", "4.16.z"),
+        _ocp_issue("OCPBUGS-2", "4.20"),
+    ]
+    tracker, streams = pipeline._lookup_ocp(jira, {}, "CVE-1", OCP_CLI)
+    assert tracker.key == "OCPBUGS-2"
+    assert streams == ["4.16.z", "4.20", "4.21"]
+
+
+@pytest.mark.parametrize(
+    "streams, expected",
+    [
+        (None, "The OCPBUGS lookup failed."),
+        ([], "returned no trackers"),
+        (["4.16.z", "4.19"], "returned trackers for 4.16.z, 4.19 only."),
+    ],
+)
+def test_classify_explains_missing_ocp_tracker(streams, expected):
+    # MTV-6175 on 2026-10-23: a transient search miss for OCPBUGS-98894.
+    facts = Facts(
+        ticket=_ticket(),
+        candidates=["pyasn1"],
+        found=[FoundPackage("pyasn1", "0.6.1", "/usr/local/lib", True)],
+        ranges=ct.ranges_from_text("Prior to 0.6.4"),
+        base=OCP_OPERATOR,
+        ocp_streams=streams,
+    )
+    category, evidence = ct.classify(facts, JIRA)
+    assert category == ct.NEEDS_REVIEW
+    assert expected in evidence[-1]
+
+
+def test_title_aliases_cover_ansible_galaxy_and_pip():
+    from config import config
+
+    aliases = config.get_cve_triage()["package_aliases"]
+    galaxy = (
+        "CVE-2026-11332 ns/mtv-rhel9-operator: argument injection in "
+        "ansible-galaxy role install leads to arbitrary code execution "
+        "[mtv-2.12]"
+    )
+    pip = (
+        "CVE-2026-8643 ns/mtv-rhel9-operator: Path traversal via malicious "
+        "entry point name in pip wheel installation allows arbitrary file "
+        "overwrite [mtv-2.11]"
+    )
+    assert ct.candidates_from_title(galaxy, aliases) == ["ansible-core"]
+    assert ct.candidates_from_title(pip, aliases) == ["pip"]
 
 
 def _osv_response(status, payload=None):

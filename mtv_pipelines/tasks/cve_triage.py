@@ -101,6 +101,9 @@ class Facts:
     ranges: list[VulnRange] = field(default_factory=list)
     base: BaseImage | None = None
     ocp: OcpTracker | None = None
+    # Streams of the OCPBUGS trackers the search returned; None when the
+    # search wasn't run or failed. Explains a miss in the evidence.
+    ocp_streams: list[str] | None = None
 
 
 # --- Jira ticket parsing ----------------------------------------------------
@@ -330,6 +333,21 @@ def base_component(ref: str) -> str:
 def stream_from_version(version_label: str) -> str:
     m = re.match(r"v?(\d+\.\d+)", version_label or "")
     return m.group(1) if m else ""
+
+
+def tracker_streams(issues: list[dict]) -> list[str]:
+    """'... [openshift-4.16.z]' -> '4.16.z', for every tracker returned."""
+    streams = {
+        m.group(1)
+        for issue in issues
+        if (
+            m := re.search(
+                r"\[openshift-([\d.]+(?:\.z)?)\]",
+                issue.get("fields", {}).get("summary", ""),
+            )
+        )
+    }
+    return sorted(streams, key=lambda s: parse_version(s.removesuffix(".z")))
 
 
 def pick_ocp_tracker(issues: list[dict], stream: str) -> OcpTracker | None:
@@ -562,9 +580,21 @@ def classify(facts: Facts, jira_url: str) -> tuple[str, list[str]]:
         ]
     evidence.append(f"Base image: {base.ref} (OpenShift {base.stream})")
     if facts.ocp is None:
+        if facts.ocp_streams is None:
+            searched = "The OCPBUGS lookup failed."
+        elif not facts.ocp_streams:
+            searched = (
+                "The OCPBUGS search returned no trackers (possibly a "
+                "transient Jira search issue; retried next run)."
+            )
+        else:
+            searched = (
+                "The OCPBUGS search returned trackers for "
+                f"{', '.join(facts.ocp_streams)} only."
+            )
         return NEEDS_REVIEW, evidence + [
             f"No OCPBUGS tracker found for {t.cve} on {base.component} "
-            f"[openshift-{base.stream}]."
+            f"[openshift-{base.stream}]. {searched}"
         ]
     ocp = facts.ocp
     evidence.append(
