@@ -135,6 +135,9 @@ $LOCK_STEPS"
 refresh_rhel7() {
   echo "  stage 1: registry.access.redhat.com/ubi7 (repo file)"
   OLD_ENTITLEMENT=$(run_in registry.access.redhat.com/ubi7:latest "
+# ubi7's subscription-manager refuses to run while /etc/rhsm-host (a
+# symlink into /run/secrets/rhsm) resolves; remove it to register.
+rm -f /etc/rhsm-host
 subscription-manager register --activationkey=\"\${ACTIVATION_KEY}7\" --org=\"\$RHSM_ORG\" >/dev/null
 cp /etc/yum.repos.d/redhat.repo \"/source/\$COMPONENT/redhat.repo\"
 sed -i \"s/\$(uname -m)/\\\$basearch/g; s/\\\$releasever/7Server/g\" \"/source/\$COMPONENT/redhat.repo\"

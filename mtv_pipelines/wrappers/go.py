@@ -1,3 +1,4 @@
+import glob
 import json
 import logging
 import os
@@ -111,15 +112,45 @@ class Go:
         if binary:
             args[1:1] = ["-mode", "binary"]
             args.append(binary)
+        # -scan module walks the import graph of the "." package and rejects
+        # patterns, so it fails when the module directory itself has no Go
+        # files (forklift's root). Drop in a stub main importing every
+        # non-internal package of the module's build closure — the union of
+        # their import graphs — and remove it afterwards. Internal packages
+        # can't be imported from here but every one sits behind a non-internal
+        # package of its own module, so coverage is preserved.
+        stub = ""
+        if not binary and not glob.glob(os.path.join(self.module_dir, "*.go")):
+            stub = os.path.join(self.module_dir, "zz_dep_bump_scan.go")
+            template = (
+                '{{if and (ne .Name "main") .Module}}{{.ImportPath}}{{end}}'
+            )
+            packages = self._run(
+                ["go", "list", "-deps", "-f", template, "./..."], "-mod=mod"
+            )
+            importable = [
+                p
+                for p in packages.splitlines()
+                if p and not p.endswith("/internal") and "/internal/" not in p
+            ]
+            with open(stub, "w") as f:
+                f.write("package main\n\n")
+                for p in importable:
+                    f.write(f'import _ "{p}"\n')
+                f.write("\nfunc main() {}\n")
         logger.info(f"[{self.module_dir}] {' '.join(args)}")
-        result = subprocess.run(
-            args,
-            cwd=self.module_dir,
-            env=env,
-            capture_output=True,
-            text=True,
-            timeout=self.timeout,
-        )
+        try:
+            result = subprocess.run(
+                args,
+                cwd=self.module_dir,
+                env=env,
+                capture_output=True,
+                text=True,
+                timeout=self.timeout,
+            )
+        finally:
+            if stub:
+                os.unlink(stub)
         # govulncheck exits 3 when it finds vulnerabilities; that's success.
         if result.returncode not in (0, 3):
             raise GoCommandError(result.stderr.strip())
