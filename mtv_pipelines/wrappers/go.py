@@ -148,6 +148,8 @@ class Go:
                 text=True,
                 timeout=self.timeout,
             )
+        except subprocess.TimeoutExpired as e:
+            raise GoCommandError(f"{' '.join(args)} timed out") from e
         finally:
             if stub:
                 os.unlink(stub)

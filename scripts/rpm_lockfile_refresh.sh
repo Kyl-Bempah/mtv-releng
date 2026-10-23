@@ -46,9 +46,14 @@ if [[ "$(uname -m)" != "x86_64" && -z "${FORCE_ARCH:-}" ]]; then
   die "run this on an x86_64 host (set FORCE_ARCH=1 to emulate)"
 fi
 
-# Base image labels are read on the host; reuse the same credentials.
+# Base image labels are read on the host; reuse the same credentials. Log in
+# with a throwaway authfile so the service-account credential doesn't persist
+# in the host's default auth.json after this script exits.
+AUTHFILE="$(mktemp)"
+trap 'rm -f "$AUTHFILE"' EXIT
 printf '%s' "$REGISTRY_AUTH_PASS" \
-  | skopeo login -u "$REGISTRY_AUTH_USER" --password-stdin registry.redhat.io >/dev/null
+  | skopeo login --authfile "$AUTHFILE" -u "$REGISTRY_AUTH_USER" \
+      --password-stdin registry.redhat.io >/dev/null
 
 if [[ $# -eq 0 ]]; then
   mapfile -t COMPONENTS < <(
@@ -80,7 +85,8 @@ stage_image() {
 # rhel_version <image>: "10.1" / "9" from the cpe label, falling back to the name
 rhel_version() {
   local cpe
-  cpe=$(skopeo inspect --override-os linux --override-arch amd64 --no-tags \
+  cpe=$(skopeo inspect --authfile "$AUTHFILE" --override-os linux \
+          --override-arch amd64 --no-tags \
           --format '{{index .Labels "cpe"}}' "docker://$1" 2>/dev/null || true)
   if [[ "$cpe" =~ enterprise_linux:([0-9]+(\.[0-9]+)?) ]]; then
     echo "${BASH_REMATCH[1]}"
@@ -171,6 +177,12 @@ for COMPONENT in "${COMPONENTS[@]}"; do
   echo "== $COMPONENT"
   if [[ ! -f "$spec" ]]; then
     echo "  no rpms.in.yaml"; failed+=("$COMPONENT"); continue
+  fi
+  # Only the stageName selector is supported; rather than silently locking
+  # against the wrong stage, fail loudly on the others.
+  if grep -qE '^[[:space:]]*(stageNum|imagePattern):' "$spec"; then
+    echo "  unsupported stage selector in rpms.in.yaml (stageNum/imagePattern)"
+    failed+=("$COMPONENT"); continue
   fi
   file=$(yaml_value "$spec" file)
   stage=$(yaml_value "$spec" stageName)
