@@ -415,6 +415,7 @@ def _module(fake: FakeGo, builders=None, allow_raise=False):
     module.paths = []
     module.builders = builders or []
     module.resync = False
+    module.broken = ""
     module.restore = fake.reset
     module.allow_go_raise = lambda: allow_raise
     module.builder_bumps = lambda directive: []
@@ -772,8 +773,12 @@ def test_update_module_reports_baseline_failure():
     )
     result = DepBumpRepoResultDTO(repo="forklift", branch="release-2.12")
     assert pipeline.update_module(_module(fake), result) is False
+    # The tidy/vendor probe runs first now: a committed build failure means
+    # even re-vendoring doesn't help, so it's reported as a manual update.
     assert result.rejected[0].reason == (
-        "baseline build fails: pkg/a.go:1: undefined: libvirt.ConnectAuth"
+        "re-running `go mod tidy`/`go mod vendor` with no bump breaks the "
+        "build (pkg/a.go:1: undefined: libvirt.ConnectAuth); "
+        "needs a manual update"
     )
 
 

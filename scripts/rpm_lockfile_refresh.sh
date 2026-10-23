@@ -147,6 +147,14 @@ ls /etc/pki/entitlement/ | grep -v -- '-key.pem' | head -1 | sed 's/\\.pem\$//'"
   echo "  stage 2: registry.access.redhat.com/ubi9 (lockfile)"
   run_in registry.access.redhat.com/ubi9:latest "
 subscription-manager register --activationkey=\"\${ACTIVATION_KEY}9\" --org=\"\$RHSM_ORG\" >/dev/null
+# Same EUS 404s as the standard flow: the activation key enables RHEL 9 EUS
+# repos that only exist on EUS minors.
+arch=\$(uname -m)
+subscription-manager repos \\
+  --disable=\"rhel-9-for-\$arch-baseos-eus-rpms\" \\
+  --disable=\"rhel-9-for-\$arch-appstream-eus-rpms\" \\
+  --disable=\"rhel-9-for-\$arch-baseos-eus-source-rpms\" \\
+  --disable=\"rhel-9-for-\$arch-appstream-eus-source-rpms\" >/dev/null || true
 new=\$(ls /etc/pki/entitlement/ | grep -v -- '-key.pem' | head -1 | sed 's/\\.pem\$//')
 sed -i \"s/\$OLD_ENTITLEMENT/\$new/g\" \"/source/\$COMPONENT/redhat.repo\"
 $LOCK_STEPS"

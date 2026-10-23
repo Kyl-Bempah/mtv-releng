@@ -250,6 +250,9 @@ class _Module:
         # Set for modules replacing forklift => ../../ once root changed:
         # their clean state is HEAD plus a re-sync with the new root.
         self.resync = False
+        # Why a tidy/vendor probe failed on the committed module, if it did;
+        # such a module can't take bumps and is reported once.
+        self.broken = ""
 
     def restore(self) -> None:
         """Back to the branch's committed state."""
@@ -276,6 +279,44 @@ class _Module:
 
     def build(self) -> None:
         self.go.build(self.cfg["build"])
+
+    def tidy_probe(self, result) -> bool:
+        """Whether tidy/vendor on the clean module reproduces it and builds.
+
+        A module that isn't tidy, or whose vendor/ is stale, would make every
+        bump look like a cascade or a breakage; report it once instead.
+        """
+        if self.broken:
+            return False
+        original = self.mod()
+        guard = self.run.cfg["cascade_guard"]
+        try:
+            self.sync()
+            tidied = self.mod()
+            drift = cascades(original, tidied, set(), guard)
+            if not drift and tidied.go == original.go:
+                self.build()
+        except GoCommandError as e:
+            self.reset()
+            self.broken = (
+                "re-running `go mod tidy`/`go mod vendor` with no bump "
+                f"breaks the build ({_first_line(e)})"
+            )
+        else:
+            self.reset()
+            if drift or tidied.go != original.go:
+                self.broken = (
+                    "module is not tidy-clean (`go mod tidy` alone moves "
+                    + "; ".join(
+                        drift[:3] or [f"go {original.go} -> {tidied.go}"]
+                    )
+                    + ")"
+                )
+        if self.broken:
+            _reject(
+                result, self.rel, "*", f"{self.broken}; needs a manual update"
+            )
+        return not self.broken
 
     def scan(self) -> list[dict]:
         """govulncheck findings; a single-binary module scans its binary."""
@@ -523,43 +564,14 @@ class _Bumper:
 def update_module(module: _Module, result: DepBumpRepoResultDTO) -> bool:
     """Apply the safe bumps to one module; True if anything changed."""
     rel = module.rel
-    guard = module.run.cfg["cascade_guard"]
+    if not module.tidy_probe(result):
+        return False
     try:
         module.build()
     except GoCommandError as e:
         _reject(result, rel, "*", f"baseline build fails: {_first_line(e)}")
         return False
     original = module.mod()
-
-    # A module that isn't tidy, or whose vendor/ is stale, would make every
-    # bump look like a cascade or a breakage; report it once instead.
-    try:
-        module.sync()
-        tidied = module.mod()
-        drift = cascades(original, tidied, set(), guard)
-        if not drift and tidied.go == original.go:
-            module.build()
-    except GoCommandError as e:
-        module.reset()
-        _reject(
-            result,
-            rel,
-            "*",
-            "re-running `go mod tidy`/`go mod vendor` with no bump breaks "
-            f"the build ({_first_line(e)}); needs a manual update",
-        )
-        return False
-    module.reset()
-    if drift or tidied.go != original.go:
-        _reject(
-            result,
-            rel,
-            "*",
-            "module is not tidy-clean (`go mod tidy` alone moves "
-            + "; ".join(drift[:3] or [f"go {original.go} -> {tidied.go}"])
-            + "); needs a manual update",
-        )
-        return False
 
     bumper = _Bumper(module, result, original)
     try:
@@ -605,17 +617,21 @@ def bump_go(run: _Run, result: DepBumpRepoResultDTO) -> None:
         return
 
     root, rest = modules[0], modules[1:]
+    # Modules that replace forklift => ../../ vendor root packages, so root's
+    # new requirements must flow into them and still build. Probe them while
+    # everything is pristine: one that can't re-vendor even with no root
+    # change is already broken and must not veto root's bumps — #8853 left
+    # cmd/kubectl-mtv's committed vendor untouched for that reason.
+    dependents = [
+        m
+        for m in rest
+        if "github.com/kubev2v/forklift" in m.mod().replaced
+        and m.tidy_probe(result)
+    ]
     root_changed = update_module(root, result)
     root_bumps = len(result.go_bumps)
 
     if root_changed:
-        # Modules that replace forklift => ../../ vendor root packages, so
-        # root's new requirements must flow into them and still build.
-        dependents = [
-            m
-            for m in rest
-            if "github.com/kubev2v/forklift" in m.mod().replaced
-        ]
         synced = []
         for dep in dependents:
             before = dep.mod()
