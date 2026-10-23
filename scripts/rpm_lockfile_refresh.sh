@@ -115,15 +115,16 @@ refresh_standard() {
   echo "  container: $image"
   run_in "$image" "
 subscription-manager register --activationkey=\"\${ACTIVATION_KEY}\${RHEL_MAJOR}\" --org=\"\$RHSM_ORG\" >/dev/null
-if [[ \$RHEL_MAJOR -ge 10 ]]; then
-  arch=\$(uname -m)
-  subscription-manager repos \
-    --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-baseos-eus-rpms\" \
-    --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-appstream-eus-rpms\" \
-    --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-baseos-eus-source-rpms\" \
-    --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-appstream-eus-source-rpms\" >/dev/null
-  yum clean all -q
-fi
+# EUS repos 404 unless the minor is an EUS release; disable them on every
+# RHEL major (the manual guide does this for RHEL 10) so dnf and the
+# lockfile don't try to fetch them.
+arch=\$(uname -m)
+subscription-manager repos \\
+  --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-baseos-eus-rpms\" \\
+  --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-appstream-eus-rpms\" \\
+  --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-baseos-eus-source-rpms\" \\
+  --disable=\"rhel-\${RHEL_MAJOR}-for-\$arch-appstream-eus-source-rpms\" >/dev/null || true
+yum clean all -q
 cp /etc/yum.repos.d/redhat.repo \"/source/\$COMPONENT/redhat.repo\"
 sed -i \"s/\$(uname -m)/\\\$basearch/g\" \"/source/\$COMPONENT/redhat.repo\"
 $LOCK_STEPS"
@@ -152,6 +153,8 @@ export RLP_URL ACTIVATION_KEY RHSM_ORG
 ok=() failed=()
 for COMPONENT in "${COMPONENTS[@]}"; do
   COMPONENT="${COMPONENT%/}"
+  # Accept a bare component name; the ".konflux/" prefix is optional
+  [[ -f "$CHECKOUT/$COMPONENT/rpms.in.yaml" ]] || COMPONENT=".konflux/$COMPONENT"
   export COMPONENT
   spec="$CHECKOUT/$COMPONENT/rpms.in.yaml"
   echo "== $COMPONENT"
