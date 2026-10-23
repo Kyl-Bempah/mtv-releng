@@ -20,6 +20,7 @@
 #                   major is appended)
 #   RHSM_ORG        subscription org (default 11009103)
 #   FORCE_ARCH=1    run on a non-x86_64 host anyway (emulated, slow)
+#   NO_RETRY=1      don't retry failed components after the cooldown
 #
 # Use the shared MTV registry service account, not personal credentials. The
 # credentials are passed to the containers through the environment only.
@@ -120,7 +121,18 @@ refresh_standard() {
   local image="registry.access.redhat.com/ubi${RHEL_MAJOR}:${RHEL_MINOR:-latest}"
   echo "  container: $image"
   run_in "$image" "
-subscription-manager register --activationkey=\"\${ACTIVATION_KEY}\${RHEL_MAJOR}\" --org=\"\$RHSM_ORG\" >/dev/null
+registered=0
+for attempt in 1 2 3; do
+  if subscription-manager register --activationkey=\"\${ACTIVATION_KEY}\${RHEL_MAJOR}\" --org=\"\$RHSM_ORG\" >/dev/null; then
+    registered=1
+    break
+  fi
+  sleep 30
+done
+[[ \$registered -eq 1 ]]
+# RHSM rate limits rapid registrations; unregister when the container exits
+# so it doesn't leave a stale registration on the org.
+trap 'subscription-manager unregister >/dev/null 2>&1 || true' EXIT
 # EUS repos 404 unless the minor is an EUS release; disable them on every
 # RHEL major (the manual guide does this for RHEL 10) so dnf and the
 # lockfile don't try to fetch them.
@@ -144,7 +156,16 @@ refresh_rhel7() {
 # ubi7's subscription-manager refuses to run while /etc/rhsm-host (a
 # symlink into /run/secrets/rhsm) resolves; remove it to register.
 rm -f /etc/rhsm-host
-subscription-manager register --activationkey=\"\${ACTIVATION_KEY}7\" --org=\"\$RHSM_ORG\" >/dev/null
+registered=0
+for attempt in 1 2 3; do
+  if subscription-manager register --activationkey=\"\${ACTIVATION_KEY}7\" --org=\"\$RHSM_ORG\" >/dev/null; then
+    registered=1
+    break
+  fi
+  sleep 30
+done
+[[ \$registered -eq 1 ]]
+trap 'subscription-manager unregister >/dev/null 2>&1 || true' EXIT
 cp /etc/yum.repos.d/redhat.repo \"/source/\$COMPONENT/redhat.repo\"
 sed -i \"s/\$(uname -m)/\\\$basearch/g; s/\\\$releasever/7Server/g\" \"/source/\$COMPONENT/redhat.repo\"
 ls /etc/pki/entitlement/ | grep -v -- '-key.pem' | head -1 | sed 's/\\.pem\$//'" | tail -1)
@@ -152,7 +173,16 @@ ls /etc/pki/entitlement/ | grep -v -- '-key.pem' | head -1 | sed 's/\\.pem\$//'"
   [[ -n "$OLD_ENTITLEMENT" ]] || { echo "  could not read the RHEL 7 entitlement id"; return 1; }
   echo "  stage 2: registry.access.redhat.com/ubi9 (lockfile)"
   run_in registry.access.redhat.com/ubi9:latest "
-subscription-manager register --activationkey=\"\${ACTIVATION_KEY}9\" --org=\"\$RHSM_ORG\" >/dev/null
+registered=0
+for attempt in 1 2 3; do
+  if subscription-manager register --activationkey=\"\${ACTIVATION_KEY}9\" --org=\"\$RHSM_ORG\" >/dev/null; then
+    registered=1
+    break
+  fi
+  sleep 30
+done
+[[ \$registered -eq 1 ]]
+trap 'subscription-manager unregister >/dev/null 2>&1 || true' EXIT
 # Same EUS 404s as the standard flow: the activation key enables RHEL 9 EUS
 # repos that only exist on EUS minors.
 arch=\$(uname -m)
@@ -168,37 +198,38 @@ $LOCK_STEPS"
 
 export RLP_URL ACTIVATION_KEY RHSM_ORG
 ok=() failed=()
-for COMPONENT in "${COMPONENTS[@]}"; do
-  COMPONENT="${COMPONENT%/}"
+
+refresh_one() {
+  local COMPONENT="${1%/}"
   # Accept a bare component name; the ".konflux/" prefix is optional
   [[ -f "$CHECKOUT/$COMPONENT/rpms.in.yaml" ]] || COMPONENT=".konflux/$COMPONENT"
   export COMPONENT
   spec="$CHECKOUT/$COMPONENT/rpms.in.yaml"
   echo "== $COMPONENT"
   if [[ ! -f "$spec" ]]; then
-    echo "  no rpms.in.yaml"; failed+=("$COMPONENT"); continue
+    echo "  no rpms.in.yaml"; failed+=("$COMPONENT"); return
   fi
   # Only the stageName selector is supported; rather than silently locking
   # against the wrong stage, fail loudly on the others.
   if grep -qE '^[[:space:]]*(stageNum|imagePattern):' "$spec"; then
     echo "  unsupported stage selector in rpms.in.yaml (stageNum/imagePattern)"
-    failed+=("$COMPONENT"); continue
+    failed+=("$COMPONENT"); return
   fi
   file=$(yaml_value "$spec" file)
   stage=$(yaml_value "$spec" stageName)
   containerfile=$(realpath -m "$CHECKOUT/$COMPONENT/$file")
   if ! image=$(stage_image "$containerfile" "$stage"); then
-    echo "  no FROM for stage '${stage:-<last>}' in $file"; failed+=("$COMPONENT"); continue
+    echo "  no FROM for stage '${stage:-<last>}' in $file"; failed+=("$COMPONENT"); return
   fi
   if grep -qE '\.el7([^0-9]|$)' "$spec"; then
     RHEL_MAJOR=7 RHEL_MINOR=""
     export RHEL_MAJOR RHEL_MINOR
     echo "  base: $image (RHEL 7 packages)"
     if refresh_rhel7; then ok+=("$COMPONENT"); else failed+=("$COMPONENT"); fi
-    continue
+    return
   fi
   if ! version=$(rhel_version "$image"); then
-    echo "  can't tell the RHEL version of $image"; failed+=("$COMPONENT"); continue
+    echo "  can't tell the RHEL version of $image"; failed+=("$COMPONENT"); return
   fi
   RHEL_MAJOR="${version%%.*}"
   RHEL_MINOR=""
@@ -206,7 +237,24 @@ for COMPONENT in "${COMPONENTS[@]}"; do
   export RHEL_MAJOR RHEL_MINOR
   echo "  base: $image (RHEL $version)"
   if refresh_standard; then ok+=("$COMPONENT"); else failed+=("$COMPONENT"); fi
+}
+
+for COMPONENT in "${COMPONENTS[@]}"; do
+  refresh_one "$COMPONENT"
 done
+
+# A large batch can trip RHSM's registration rate limit near the end; give
+# failed components one more attempt after a cooldown.
+if (( ${#failed[@]} )) && [[ -z "${NO_RETRY:-}" ]]; then
+  echo
+  echo "retrying after 60s: ${failed[*]}"
+  sleep 60
+  retry=("${failed[@]}")
+  failed=()
+  for COMPONENT in "${retry[@]}"; do
+    refresh_one "$COMPONENT"
+  done
+fi
 
 echo
 echo "Refreshed: ${ok[*]:-none}"
