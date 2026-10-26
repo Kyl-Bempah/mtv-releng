@@ -53,6 +53,10 @@ fi
 # in the host's default auth.json after this script exits.
 AUTHFILE="$(mktemp)"
 trap 'rm -f "$AUTHFILE"' EXIT
+# Seed an empty credential store: some skopeo builds refuse to merge login
+# credentials into a pre-created zero-byte authfile ("unexpected end of JSON
+# input"), while all of them read "{}" as no credentials.
+printf '{}' >"$AUTHFILE"
 printf '%s' "$REGISTRY_AUTH_PASS" \
   | skopeo login --authfile "$AUTHFILE" -u "$REGISTRY_AUTH_USER" \
       --password-stdin registry.redhat.io >/dev/null
