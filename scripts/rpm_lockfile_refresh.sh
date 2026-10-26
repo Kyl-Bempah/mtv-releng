@@ -163,6 +163,28 @@ done
 echo "RLP-FAILED:${failed}"
 EOF
 
+read -r -d '' RELEASEVER_STEPS <<'EOF' || true
+# RHEL 7 repo files keep $releasever in their baseurls; the ubi9 solver would
+# expand it to its own releasever, so pin it to the 7 server stream. RHEL 8
+# repo files use literal versioned URLs and need no pinning.
+if [ "$RHEL_MAJOR" = 7 ]; then
+  for COMPONENT in $GROUP_COMPONENTS; do
+    sed -i "s/\$releasever/7Server/g" "/source/$COMPONENT/redhat.repo"
+  done
+fi
+EOF
+
+read -r -d '' ENTITLEMENT_STEPS <<'EOF' || true
+ls /etc/pki/entitlement/ | grep -v -- '-key.pem' | head -1 | sed 's/\.pem$//'
+EOF
+
+read -r -d '' SWAP_STEPS <<'EOF' || true
+new=$(ls /etc/pki/entitlement/ | grep -v -- '-key.pem' | head -1 | sed 's/\.pem$//')
+for COMPONENT in $GROUP_COMPONENTS; do
+  sed -i "s/$OLD_ENTITLEMENT/$new/g" "/source/$COMPONENT/redhat.repo"
+done
+EOF
+
 run_in() {  # run_in <image> <script>
   podman run --rm --platform linux/amd64 --tmpfs /run/secrets \
     -v "$CHECKOUT:/source:Z" \
@@ -197,66 +219,67 @@ $SOLVE_STEPS" 2>&1 | tee /dev/stderr); then
   done
 }
 
-# winlegacyiso: RHEL 7 repo file, locked from a RHEL 9 container whose
-# entitlement certs replace the RHEL 7 container's in redhat.repo.
-refresh_rhel7() {
-  # Stage 2 solves a single component, but it reuses SOLVE_STEPS, which
-  # iterates GROUP_COMPONENTS.
-  export GROUP_COMPONENTS="$COMPONENT"
-  echo "  stage 1: registry.access.redhat.com/ubi7 (repo file)"
-  OLD_ENTITLEMENT=$(run_in registry.access.redhat.com/ubi7:latest "
-# ubi7's subscription-manager refuses to run while /etc/rhsm-host (a
-# symlink into /run/secrets/rhsm) resolves; remove it to register.
-rm -f /etc/rhsm-host
-registered=0
-for attempt in 1 2 3; do
-  if subscription-manager register --activationkey=\"\${ACTIVATION_KEY}7\" --org=\"\$RHSM_ORG\" >/dev/null; then
-    registered=1
-    break
+# RHEL 7 and 8: the solver can't be the base image's own RHEL major.
+# rpm-lockfile-prototype needs Python >= 3.8 together with the dnf bindings,
+# and those bindings exist only for the system python (3.6 on RHEL 8, older
+# still on RHEL 7). Stage 1 registers a ubi<major> container and writes the
+# repo files; stage 2 registers ubi9 and solves there, with its own
+# entitlement ids swapped into the repo files (the CDN checks the certs, not
+# which RHEL wrote the file).
+refresh_two_stage() {  # refresh_two_stage <major> <component>...
+  local major=$1 log entitlement failed_list c
+  shift
+  local components="$*"
+  export GROUP_COMPONENTS="$components"
+  RHEL_MAJOR="$major" RHEL_MINOR=""
+  export RHEL_MAJOR RHEL_MINOR
+  # ubi7's subscription-manager refuses to run while /etc/rhsm-host (a
+  # symlink into /run/secrets/rhsm) resolves; removing it is harmless on 8.
+  echo "  stage 1: registry.access.redhat.com/ubi${major}:latest (repo files, $# components)"
+  entitlement=""
+  if log=$(run_in "registry.access.redhat.com/ubi${major}:latest" "rm -f /etc/rhsm-host
+$REGISTER_STEPS
+$EUS_STEPS
+$COPY_STEPS
+$RELEASEVER_STEPS
+$ENTITLEMENT_STEPS" 2>&1 | tee /dev/stderr); then
+    entitlement="$(tail -1 <<<"$log")"
   fi
-  sleep 30
-done
-[[ \$registered -eq 1 ]]
-trap 'subscription-manager unregister >/dev/null 2>&1 || true' EXIT
-cp /etc/yum.repos.d/redhat.repo \"/source/\$COMPONENT/redhat.repo\"
-sed -i \"s/\$(uname -m)/\\\$basearch/g; s/\\\$releasever/7Server/g\" \"/source/\$COMPONENT/redhat.repo\"
-ls /etc/pki/entitlement/ | grep -v -- '-key.pem' | head -1 | sed 's/\\.pem\$//'" | tail -1)
-  export OLD_ENTITLEMENT
-  [[ -n "$OLD_ENTITLEMENT" ]] || { echo "  could not read the RHEL 7 entitlement id"; return 1; }
-  echo "  stage 2: registry.access.redhat.com/ubi9 (lockfile)"
-  run_in registry.access.redhat.com/ubi9:latest "
-registered=0
-for attempt in 1 2 3; do
-  if subscription-manager register --activationkey=\"\${ACTIVATION_KEY}9\" --org=\"\$RHSM_ORG\" >/dev/null; then
-    registered=1
-    break
+  if [[ -z "$entitlement" ]]; then
+    echo "  stage 1 failed for:$components"
+    failed+=($components)
+    return
   fi
-  sleep 30
-done
-[[ \$registered -eq 1 ]]
-trap 'subscription-manager unregister >/dev/null 2>&1 || true' EXIT
-# Same EUS 404s as the standard flow: the activation key enables RHEL 9 EUS
-# repos that only exist on EUS minors.
-arch=\$(uname -m)
-subscription-manager repos \\
-  --disable=\"rhel-9-for-\$arch-baseos-eus-rpms\" \\
-  --disable=\"rhel-9-for-\$arch-appstream-eus-rpms\" \\
-  --disable=\"rhel-9-for-\$arch-baseos-eus-source-rpms\" \\
-  --disable=\"rhel-9-for-\$arch-appstream-eus-source-rpms\" >/dev/null || true
-new=\$(ls /etc/pki/entitlement/ | grep -v -- '-key.pem' | head -1 | sed 's/\\.pem\$//')
-sed -i \"s/\$OLD_ENTITLEMENT/\$new/g\" \"/source/\$COMPONENT/redhat.repo\"
+  export OLD_ENTITLEMENT="$entitlement"
+  echo "  stage 2: registry.access.redhat.com/ubi9:latest (lockfiles)"
+  RHEL_MAJOR=9 RHEL_MINOR=""
+  export RHEL_MAJOR RHEL_MINOR
+  if log=$(run_in registry.access.redhat.com/ubi9:latest "$REGISTER_STEPS
+$EUS_STEPS
+$SWAP_STEPS
 $DEPS_STEPS
-$SOLVE_STEPS"
+$SOLVE_STEPS" 2>&1 | tee /dev/stderr); then
+    failed_list="$(sed -n 's/^RLP-FAILED://p' <<<"$log" | tail -1)"
+  else
+    failed_list="$components"
+  fi
+  for c in $components; do
+    if [[ " $failed_list " == *" $c "* ]]; then
+      failed+=("$c")
+    else
+      ok+=("$c")
+    fi
+  done
 }
 
 export RLP_URL ACTIVATION_KEY RHSM_ORG
 ok=() failed=()
 
 # Resolve every component to its solver image, then refresh each group in
-# one container. RHEL 7 components (el7 package sets) keep their own
-# two-stage flow.
+# one container. RHEL 7 and 8 components keep their own two-stage flow:
+# their system pythons can't run rpm-lockfile-prototype.
 refresh_batch() {  # refresh_batch <component>...
-  local -A groups=()
+  local -A groups=() two_stage=()
   local COMPONENT spec file stage containerfile image version major minor
   for COMPONENT in "$@"; do
     COMPONENT="${COMPONENT%/}"
@@ -281,10 +304,8 @@ refresh_batch() {  # refresh_batch <component>...
       echo "  no FROM for stage '${stage:-<last>}' in $file"; failed+=("$COMPONENT"); continue
     fi
     if grep -qE '\.el7([^0-9]|$)' "$spec"; then
-      RHEL_MAJOR=7 RHEL_MINOR=""
-      export RHEL_MAJOR RHEL_MINOR
       echo "  base: $image (RHEL 7 packages)"
-      if refresh_rhel7; then ok+=("$COMPONENT"); else failed+=("$COMPONENT"); fi
+      two_stage[7]+="$COMPONENT "
       continue
     fi
     if ! version=$(rhel_version "$image"); then
@@ -294,7 +315,17 @@ refresh_batch() {  # refresh_batch <component>...
     minor=""
     [[ "$version" == *.* ]] && minor="$version"
     echo "  base: $image (RHEL $version)"
-    groups["registry.access.redhat.com/ubi${major}:${minor:-latest}"]+="$COMPONENT "
+    if (( major <= 8 )); then
+      # RHEL 8's system python is too old for rpm-lockfile-prototype too;
+      # same two-stage flow as the el7 package sets.
+      two_stage[$major]+="$COMPONENT "
+    else
+      groups["registry.access.redhat.com/ubi${major}:${minor:-latest}"]+="$COMPONENT "
+    fi
+  done
+
+  for major in $(printf '%s\n' "${!two_stage[@]}" | sort); do
+    refresh_two_stage "$major" ${two_stage[$major]}
   done
 
   for image in $(printf '%s\n' "${!groups[@]}" | sort); do
