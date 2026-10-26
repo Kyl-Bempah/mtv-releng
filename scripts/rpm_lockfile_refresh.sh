@@ -131,7 +131,8 @@ yum clean all -q
 EOF
 
 read -r -d '' DEPS_STEPS <<'EOF' || true
-dnf install -y -q pip skopeo >/dev/null
+# python3-pip, not pip: RHEL 8 has no package named "pip"
+dnf install -y -q python3-pip skopeo >/dev/null
 printf '%s' "$REGISTRY_AUTH_PASS" \
   | skopeo login -u "$REGISTRY_AUTH_USER" --password-stdin registry.redhat.io >/dev/null
 python3 -m pip install -q --user "$RLP_URL"
