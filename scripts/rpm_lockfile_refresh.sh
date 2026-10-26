@@ -154,7 +154,11 @@ read -r -d '' SOLVE_STEPS <<'EOF' || true
 failed=""
 for COMPONENT in $GROUP_COMPONENTS; do
   echo "== solving $COMPONENT"
-  if (cd "/source/$COMPONENT" && rpm-lockfile-prototype rpms.in.yaml); then
+  args=""
+  # A lock in BARE_COMPONENTS carries the base image's own packages; keep it
+  # a full closure (see the detection in refresh_batch).
+  case " $BARE_COMPONENTS " in *" $COMPONENT "*) args="--bare" ;; esac
+  if (cd "/source/$COMPONENT" && rpm-lockfile-prototype $args rpms.in.yaml); then
     :
   else
     failed="$failed $COMPONENT"
@@ -164,10 +168,16 @@ echo "RLP-FAILED:${failed}"
 EOF
 
 read -r -d '' RELEASEVER_STEPS <<'EOF' || true
-# RHEL 7 repo files keep $releasever in their baseurls; the ubi9 solver would
-# expand it to its own releasever, so pin it to the 7 server stream. RHEL 8
-# repo files use literal versioned URLs and need no pinning.
-if [ "$RHEL_MAJOR" = 7 ]; then
+# Repo files written inside UBI containers keep $releasever in their baseurls,
+# and dnf inside UBI expands it to the bare major: the rolling current-GA
+# stream. Pin it to the base image's RHEL minor so the lock matches the base
+# (9.6 EUS content for a ubi9:9.6 base, not today's 9.8). RHEL 7 repo files
+# need the 7Server stream instead; RHEL 8 files already use literal URLs.
+if [ -n "$RHEL_MINOR" ]; then
+  for COMPONENT in $GROUP_COMPONENTS; do
+    sed -i "s/\$releasever/$RHEL_MINOR/g" "/source/$COMPONENT/redhat.repo"
+  done
+elif [ "$RHEL_MAJOR" = 7 ]; then
   for COMPONENT in $GROUP_COMPONENTS; do
     sed -i "s/\$releasever/7Server/g" "/source/$COMPONENT/redhat.repo"
   done
@@ -189,7 +199,7 @@ run_in() {  # run_in <image> <script>
   podman run --rm --platform linux/amd64 --tmpfs /run/secrets \
     -v "$CHECKOUT:/source:Z" \
     -e COMPONENT -e RHEL_MAJOR -e RHEL_MINOR -e ACTIVATION_KEY -e RHSM_ORG \
-    -e GROUP_COMPONENTS -e RLP_URL -e REGISTRY_AUTH_USER -e REGISTRY_AUTH_PASS -e OLD_ENTITLEMENT \
+    -e GROUP_COMPONENTS -e BARE_COMPONENTS -e RLP_URL -e REGISTRY_AUTH_USER -e REGISTRY_AUTH_PASS -e OLD_ENTITLEMENT \
     "$1" bash -euo pipefail -c "$2"
 }
 
@@ -205,6 +215,7 @@ refresh_group() {  # refresh_group <image> <component>...
 $EUS_STEPS
 $DEPS_STEPS
 $COPY_STEPS
+$RELEASEVER_STEPS
 $SOLVE_STEPS" 2>&1 | tee /dev/stderr); then
     failed_list="$(sed -n 's/^RLP-FAILED://p' <<<"$log" | tail -1)"
   else
@@ -272,7 +283,7 @@ $SOLVE_STEPS" 2>&1 | tee /dev/stderr); then
   done
 }
 
-export RLP_URL ACTIVATION_KEY RHSM_ORG
+export RLP_URL ACTIVATION_KEY RHSM_ORG BARE_COMPONENTS
 ok=() failed=()
 
 # Resolve every component to its solver image, then refresh each group in
@@ -280,6 +291,9 @@ ok=() failed=()
 # their system pythons can't run rpm-lockfile-prototype.
 refresh_batch() {  # refresh_batch <component>...
   local -A groups=() two_stage=()
+  # Components whose existing lock is a full rootfs closure (detected below);
+  # their refresh keeps --bare. Reset per batch, including the retry.
+  BARE_COMPONENTS=""
   local COMPONENT spec file stage containerfile image version major minor
   for COMPONENT in "$@"; do
     COMPONENT="${COMPONENT%/}"
@@ -296,6 +310,16 @@ refresh_batch() {  # refresh_batch <component>...
     if grep -qE '^[[:space:]]*(stageNum|imagePattern):' "$spec"; then
       echo "  unsupported stage selector in rpms.in.yaml (stageNum/imagePattern)"
       failed+=("$COMPONENT"); continue
+    fi
+    # glibc is in every RHEL base image and never installed explicitly, so a
+    # lock that contains it was generated without subtracting the base image's
+    # packages -- a full rootfs closure. Some builds (copy-appliance's bake
+    # step installs into an empty root) need that; keep them in --bare mode.
+    # Self-consistent across re-runs: a --bare lock keeps glibc, a default
+    # lock doesn't.
+    if [[ -f "$CHECKOUT/$COMPONENT/rpms.lock.yaml" ]] \
+      && grep -q '^    name: glibc$' "$CHECKOUT/$COMPONENT/rpms.lock.yaml"; then
+      BARE_COMPONENTS+="$COMPONENT "
     fi
     file=$(yaml_value "$spec" file)
     stage=$(yaml_value "$spec" stageName)
